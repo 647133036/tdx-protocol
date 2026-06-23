@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.tdx_best_hosts.json
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+.DS_Store
+*.swp
+*.swo
