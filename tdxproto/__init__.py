@@ -20,7 +20,7 @@ from .compute import compute_factors, get_equity_at, calc_turnover, parse_xdxr, 
 from .stock import StockClient
 from .futures import FuturesClient
 from .scanner import (
-    scan_stock, scan_futures, best_host, ProbeResult,
+    scan_stock, scan_futures, ProbeResult,
     DEFAULT_TIMEOUT, DEFAULT_WORKERS,
 )
 from .hosts import (
@@ -35,7 +35,7 @@ __all__ = [
     "EquityChange", "FinanceInfo", "PriceLimit",
     "compute_factors", "get_equity_at", "calc_turnover", "parse_xdxr", "auction_0925",
     "classify", "normalize_code",
-    "scan_stock", "scan_futures", "best_host", "ProbeResult",
+    "scan_stock", "scan_futures", "ProbeResult",
     "DEFAULT_TIMEOUT", "DEFAULT_WORKERS",
     "STOCK_HOSTS_FAST", "STOCK_HOSTS_LARGE",
     "FUTURES_HOSTS_FAST", "FUTURES_HOSTS_LARGE",

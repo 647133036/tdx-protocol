@@ -5,6 +5,9 @@
   2. 协议握手验证 (慢, 需完成请求/响应往返)
 
 并发扫描, 按握手延迟排序。7709 与 7727 分别扫描。
+
+7709 股票: 3 步握手 (0x1893 → 0x1894 → 0x1899), 之后才能发业务命令
+7727 期货: 1 步握手 (0x2454 + 80B magic)
 """
 
 import socket
@@ -13,7 +16,7 @@ import time
 import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Callable
 
 
 DEFAULT_TIMEOUT = 2.0
@@ -51,8 +54,109 @@ def _tcp_probe(addr: str, port: int, timeout: float) -> tuple[bool, float, str |
         return False, 0.0, type(e).__name__
 
 
-def _handshake_one(addr: str, port: int, prefix: int, cmd: int, payload: bytes,
-                   timeout: float) -> tuple[bool, float, str | None]:
+def _read_response_body(sock: socket.socket, zip_len: int, timeout: float) -> bytes:
+    """读取响应 body (压缩或非压缩)."""
+    sock.settimeout(timeout)
+    zipped = bytearray()
+    while len(zipped) < zip_len:
+        remaining = zip_len - len(zipped)
+        chunk = sock.recv(remaining)
+        if not chunk:
+            raise ConnectionError("remote closed")
+        zipped.extend(chunk)
+    
+    # 需要判断是否解压: 尝试用 zlib，失败则返回原始数据
+    try:
+        data = zlib.decompress(bytes(zipped))
+        return data
+    except zlib.error:
+        return bytes(zipped)
+
+
+def _read_response_header(sock: socket.socket) -> tuple[int, int]:
+    """读取 12 字节响应头 (跳过 8 字节魔术字), 返回 (zip_len, unzip_len)."""
+    sock.settimeout(2.0)
+    
+    # 跳过 4 字节魔术字
+    magic = bytearray()
+    while len(magic) < 4:
+        chunk = sock.recv(4 - len(magic))
+        if not chunk:
+            raise ConnectionError("remote closed")
+        magic.extend(chunk)
+    
+    # 读取 8 字节头
+    hdr = bytearray()
+    while len(hdr) < 8:
+        chunk = sock.recv(8 - len(hdr))
+        if not chunk:
+            raise ConnectionError("remote closed")
+        hdr.extend(chunk)
+    
+    zip_len = struct.unpack_from("<H", hdr, 0)[0]
+    unzip_len = struct.unpack_from("<H", hdr, 2)[0]
+    
+    return zip_len, unzip_len
+
+
+def _handshake_7709(addr: str, port: int, timeout: float) -> tuple[bool, float, str | None]:
+    """7709 股票协议握手: 快速验证(仅第1步+count命令, ~50ms)."""
+    try:
+        sock = socket.create_connection((addr, port), timeout=timeout)
+        sock.settimeout(timeout)
+    except OSError as e:
+        return False, 0, type(e).__name__
+
+    started = time.perf_counter()
+    try:
+        # 第 1 步握手 (快速验证)
+        sock.sendall(bytes.fromhex("0c 02 18 93 00 01 03 00 03 00 0d 00 01"))
+        
+        # 消耗第1步响应
+        try:
+            magic = sock.recv(4)
+            if not magic:
+                raise ConnectionError("remote closed")
+            hdr = sock.recv(8)
+            zip_len = struct.unpack_from("<H", hdr, 0)[0]
+            if zip_len > 0:
+                body = sock.recv(zip_len)
+        except Exception:
+            pass
+        
+        # 发count命令验证服务器可用
+        pkg = bytearray.fromhex("0c 0c 18 6c 00 01 08 00 08 00 4e 04")
+        pkg.extend(struct.pack("<H", 1))  # market=1 (上海)
+        pkg.extend(b"\x75\xc7\x33\x01")
+        sock.sendall(bytes(pkg))
+        
+        # 读取count响应
+        hdr = sock.recv(16)
+        resp_type, c1, c2, zip_len, unzip_len = struct.unpack("<IIIHH", hdr)
+        body = sock.recv(zip_len)
+        
+        elapsed = round((time.perf_counter() - started) * 1000, 2)
+        return True, elapsed, None
+        
+    except Exception as e:
+        return False, 0, str(e)[:80]
+    finally:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def _handshake_7727(addr: str, port: int, timeout: float) -> tuple[bool, float, str | None]:
+    """7727 期货协议握手: 1 步握手 (0x2454 + 80B magic)."""
+    handshake_data = bytes.fromhex(
+        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
+        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
+        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
+        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
+        "cce16dffd5ba3fb8" "cbc57a054f7748ea"
+    )
+    
     try:
         sock = socket.create_connection((addr, port), timeout=timeout)
         sock.settimeout(timeout)
@@ -63,8 +167,8 @@ def _handshake_one(addr: str, port: int, prefix: int, cmd: int, payload: bytes,
     try:
         msg_id = 1
         control = 0x01
-        dl = len(payload) + 2
-        frame = struct.pack("<BIBHHH", prefix, msg_id, control, dl, dl, cmd) + payload
+        dl = len(handshake_data) + 2
+        frame = struct.pack("<BIBHHH", 0x01, msg_id, control, dl, dl, 0x2454) + handshake_data
         sock.sendall(frame)
 
         w = bytearray()
@@ -100,7 +204,7 @@ def _handshake_one(addr: str, port: int, prefix: int, cmd: int, payload: bytes,
 
         # 校验响应内容: 错误码/拒绝信息
         text = data.decode("gbk", errors="replace")
-        rejected = any(w in text for w in ("失败", "不允许", "演示", "登入"))
+        rejected = any(w in text for w in ("失败", "不允许", "演示", "登入", "版本不一致"))
 
         elapsed = round((time.perf_counter() - started) * 1000, 2)
         if rejected:
@@ -124,26 +228,19 @@ def _parse_host(host: str) -> tuple[str, int]:
 
 def scan_stock(hosts: list[str], *, workers: int = DEFAULT_WORKERS,
                timeout: float = DEFAULT_TIMEOUT) -> list[ProbeResult]:
-    """扫描 7709 A股主站 (prefix=0x0C, handshake=0x000D)。"""
-    return _scan(hosts, prefix=0x0C, handshake_cmd=0x000D, handshake_data=b"",
+    """扫描 7709 A股主站 (3步握手 + count验证)."""
+    return _scan(hosts, handshake_fn=_handshake_7709,
                  workers=workers, timeout=timeout)
 
 
 def scan_futures(hosts: list[str], *, workers: int = DEFAULT_WORKERS,
                  timeout: float = DEFAULT_TIMEOUT) -> list[ProbeResult]:
-    """扫描 7727 期货主站 (prefix=0x01, handshake=0x2454, 80B magic)。"""
-    handshake_data = bytes.fromhex(
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "cce16dffd5ba3fb8" "cbc57a054f7748ea"
-    )
-    return _scan(hosts, prefix=0x01, handshake_cmd=0x2454, handshake_data=handshake_data,
+    """扫描 7727 期货主站 (1步握手)."""
+    return _scan(hosts, handshake_fn=_handshake_7727,
                  workers=workers, timeout=timeout)
 
 
-def _scan(hosts: list[str], *, prefix: int, handshake_cmd: int, handshake_data: bytes,
+def _scan(hosts: list[str], *, handshake_fn: Callable,
           workers: int, timeout: float) -> list[ProbeResult]:
     candidates = list(dict.fromkeys(hosts))
     worker_count = min(max(1, workers), len(candidates))
@@ -153,8 +250,7 @@ def _scan(hosts: list[str], *, prefix: int, handshake_cmd: int, handshake_data: 
         futures: dict = {}
         for host in candidates:
             addr, port = _parse_host(host)
-            f = executor.submit(_probe_one, addr, port, prefix, handshake_cmd,
-                                handshake_data, timeout)
+            f = executor.submit(_probe_one, addr, port, handshake_fn, timeout)
             futures[f] = host
 
         for f in as_completed(futures):
@@ -165,7 +261,7 @@ def _scan(hosts: list[str], *, prefix: int, handshake_cmd: int, handshake_data: 
     return results
 
 
-def _probe_one(addr: str, port: int, prefix: int, cmd: int, payload: bytes,
+def _probe_one(addr: str, port: int, handshake_fn: Callable,
                timeout: float) -> ProbeResult:
     host = f"{addr}:{port}"
 
@@ -173,20 +269,8 @@ def _probe_one(addr: str, port: int, prefix: int, cmd: int, payload: bytes,
     if not tcp_ok:
         return ProbeResult(host=host, port=port, error=tcp_err)
 
-    hs_ok, hs_lat, hs_err = _handshake_one(addr, port, prefix, cmd, payload, timeout)
+    hs_ok, hs_lat, hs_err = handshake_fn(addr, port, timeout)
     return ProbeResult(host=host, port=port,
                        tcp_ok=True, tcp_latency_ms=tcp_lat,
                        handshake_ok=hs_ok, handshake_latency_ms=hs_lat,
                        error=hs_err)
-
-
-def best_host(hosts: list[str], *, prefix: int, handshake_cmd: int,
-              handshake_data: bytes, workers: int = DEFAULT_WORKERS,
-              timeout: float = DEFAULT_TIMEOUT) -> tuple[str, float]:
-    """快速找到最快可用主站，失败抛异常。"""
-    results = _scan(hosts, prefix=prefix, handshake_cmd=handshake_cmd,
-                    handshake_data=handshake_data, workers=workers, timeout=timeout)
-    alive = [r for r in results if r.ok]
-    if not alive:
-        raise ConnectionError(f"no host reachable out of {len(hosts)} candidates")
-    return alive[0].host, alive[0].handshake_latency_ms

@@ -78,9 +78,14 @@ class Tube:
                         timeout: float) -> list[str]:
         if not scanner_hosts:
             return list(self.hosts)
-        from .scanner import _scan
-        results = _scan(scanner_hosts, prefix=prefix, handshake_cmd=cmd,
-                        handshake_data=data, workers=64, timeout=timeout)
+        if prefix == 0x01 and cmd == 0x2454:
+            # 7727 期货
+            from .scanner import scan_futures
+            results = scan_futures(scanner_hosts, workers=64, timeout=timeout)
+        else:
+            # 7709 股票
+            from .scanner import scan_stock
+            results = scan_stock(scanner_hosts, workers=64, timeout=timeout)
         alive = [r.host for r in results if r.ok]
         return alive or list(self.hosts)
 
@@ -119,7 +124,7 @@ class Tube:
 
     def _next_mid(self) -> int:
         v = self._mid
-        self._mid = 1 if v >= 0x7FFFFFFF else v + 1
+        self._mid = 1 if v >= 0xFFFF else v + 1
         return v
 
     def _start_reader(self):

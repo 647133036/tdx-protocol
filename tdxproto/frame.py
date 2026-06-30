@@ -1,12 +1,8 @@
 """二进制帧编解码 — 7709/7727 共用层。
 
-请求帧布局 (小端):
-  [prefix:u8] [msg_id:u32] [ctrl:u8] [data_len+2:u16] [data_len+2:u16] [msg_type:u16] [payload]
-
-响应帧布局:
-  [0xB1CB7400:u32] [ctrl:u8] [msg_id:u32] [rsv:u8] [msg_type:u16] [zip_len:u16] [unzip_len:u16] [zlib_payload]
-
-创新: 使用 memoryview 零拷贝解析 + struct.iter_unpack 批量解码。
+对齐 pytdx/tdxpy:
+  请求帧: [prefix:u8] [msg_id:u32 LE] [ctrl:u8] [data_len:u16 LE] [data_len:u16 LE] [msg_type:u16 LE] [payload]
+  响应头: [type:u32 LE] [counter1:u32 LE] [counter2:u32 LE] [zip_len:u16 LE] [unzip_len:u16 LE] (16 bytes)
 """
 
 import socket
@@ -15,15 +11,16 @@ import zlib
 from dataclasses import dataclass
 from typing import Optional
 
-PREFIX_RESPONSE = b"\xB1\xCB\x74\x00"
+PREFIX_REQUEST = 0x0C
+RSP_HEADER_LEN = 0x10  # 16 bytes
 
 
 @dataclass(frozen=True, slots=True)
 class Frame:
-    prefix: int
     msg_id: int
     msg_type: int
     payload: bytes
+    prefix: int = 0x0C
     control: int = 0x01
 
     def wire(self) -> bytes:
@@ -51,16 +48,13 @@ def sock_read(s: socket.socket, n: int) -> bytes:
 
 
 def read_response(s: socket.socket) -> Response:
-    # 同步到魔术字
-    w = bytearray(sock_read(s, 4))
-    while bytes(w) != PREFIX_RESPONSE:
-        w = w[1:] + sock_read(s, 1)
-
-    hdr = sock_read(s, 12)
-    ctrl, msg_id, rsv, mtype = struct.unpack_from("<BIBH", hdr, 0)
-    zip_len = struct.unpack_from("<H", hdr, 8)[0]
-    raw_len = struct.unpack_from("<H", hdr, 10)[0]
-
-    zipped = sock_read(s, zip_len)
-    data = zlib.decompress(zipped) if zip_len != raw_len else zipped
-    return Response(msg_type=mtype, data=data, raw=bytes(w) + hdr + zipped, control=ctrl, msg_id=msg_id)
+    """读取 pytdx 格式的响应: <IIIHH (16 bytes) + body."""
+    hdr = sock_read(s, RSP_HEADER_LEN)
+    resp_type, c1, cmd_echo, zip_len, unzip_len = struct.unpack("<IIIHH", hdr)
+    body_buf = sock_read(s, zip_len)
+    if zip_len != unzip_len:
+        data = zlib.decompress(body_buf)
+    else:
+        data = body_buf
+    msg_id = (c1 >> 8) & 0xFFFF
+    return Response(msg_type=cmd_echo, msg_id=msg_id, data=data, raw=hdr + body_buf)

@@ -1,150 +1,169 @@
-"""二进制编解码工具箱。
+"""编解码工具 — 对齐 pytdx/tdxpy helper.py."""
 
-核心创新:
-  - varint 增量价格编码 (delta-of-delta)
-  - 通达信特殊成交量解码 (log+mantissa 浮点)
-  - 市场/代码标准化与分类识别
-  - 日期与时间索引的双向转换
-"""
-
-import math
 import struct
-from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import Tuple
 
-SH_TZ = timezone(timedelta(hours=8))
+def u32(data: bytes, off: int = 0) -> int:
+    return struct.unpack_from("<I", data, off)[0]
 
-MARKETS = {"sz": 0, "sh": 1, "bj": 2}
-MARKETS_REV = {0: "sz", 1: "sh", 2: "bj"}
+def u16(data: bytes, off: int = 0) -> int:
+    return struct.unpack_from("<H", data, off)[0]
 
+def f32(data: bytes, off: int = 0) -> float:
+    return struct.unpack_from("<f", data, off)[0]
 
-# ---- 整数 / 浮点读取 ----
-
-def u16(b: bytes, off: int = 0) -> int:
-    return int.from_bytes(b[off:off + 2], "little")
-
-def u32(b: bytes, off: int = 0) -> int:
-    return int.from_bytes(b[off:off + 4], "little")
-
-def f32(b: bytes, off: int = 0) -> float:
-    return struct.unpack_from("<f", b, off)[0]
-
-
-# ---- varint (增量价格编码) ----
-
-def varint(b: bytes, off: int) -> tuple[int, int]:
-    """通达信 varint: 首字节低6位 + 后续字节低7位, bit6=符号位, bit7=延续位。"""
-    val, pos, shift = 0, off, 0
-    while True:
-        byte = b[pos]
-        if pos == off:
-            val += byte & 0x3F; shift = 6
+def split_code(code: str) -> Tuple[int, str, str]:
+    """解析股票代码为 (market_int, exchange_str, numeric_code)."""
+    code = code.strip().lower()
+    if code.startswith(("sz", "sh", "bj")):
+        exchange = code[:2]
+        num = code[2:]
+    else:
+        num = code[:6]
+        if num.startswith(("6", "9", "5", "0", "8", "1", "2", "3")):
+            exchange = "sh"
         else:
-            val += (byte & 0x7F) << shift; shift += 7
-        pos += 1
-        if byte & 0x80 == 0:
-            break
-    if b[off] & 0x40:
-        val = -val
-    return val, pos
+            exchange = "sz"
+    mid = {"sz": 0, "sh": 1, "bj": 2}.get(exchange, 0)
+    return mid, exchange, num
 
+def date_int(d) -> int:
+    if hasattr(d, 'strftime'):
+        return int(d.strftime("%Y%m%d"))
+    return int(d)
 
-# ---- 成交量解码 (TDX 专利浮点格式) ----
+def int_date(val: int) -> str:
+    s = str(val)
+    if len(s) == 8:
+        return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+    return s
 
-def decode_volume(v: int) -> float:
-    """log-point 浮点成交量解码。"""
-    if v == 0:
-        return 0.0
-    s = int.from_bytes(v.to_bytes(4, "big"), "big", signed=True)
-    lp = s >> 24
-    ha = (s >> 16) & 0xFF
-    la = (s >> 8) & 0xFF
-    ll = s & 0xFF
-    base = 2.0 ** (lp * 2 - 0x7F)
-    hi = base * (64.0 + (ha & 0x7F)) / 64.0 if ha > 0x80 else base * ha / 128.0
-    sc = 2.0 if ha & 0x80 else 1.0
-    return base + hi + base * la / 32768.0 * sc + base * ll / 8388608.0 * sc
+def minute_label(minutes: int) -> str:
+    h = minutes // 60
+    m = minutes % 60
+    return f"{h:02d}:{m:02d}"
 
+def recent_selector(tdate=None) -> int:
+    """获取最近交易日整数."""
+    if tdate:
+        return date_int(tdate)
+    from datetime import datetime
+    return int(datetime.now().strftime("%Y%m%d"))
 
-# ---- 代码标准化 ----
+# ============================================================
+# 变长价格解码 — 对齐 pytdx helper.get_price
+# ============================================================
 
-def normalize_code(s: str) -> str:
-    s = s.strip().lower()
-    # 完整股票代码: sz000001
-    if len(s) == 8 and s[:2] in MARKETS and s[2:].isdigit():
-        return s
-    # 6位纯数字: 根据首位推断市场
-    if len(s) == 6 and s.isdigit():
-        if s[0] in "69": return "sh" + s
-        if s[0] in "0123": return "sz" + s
-        if s.startswith(("8", "92")): return "bj" + s
-    # 期货/ETF代码: IF2506, rb2501, 510050 等 (非纯数字 或 带字母的品种代码)
-    if s and s.isascii():
-        return s
-    raise ValueError(f"invalid code: {s!r}")
+def _index_bytes(data: bytes, pos: int) -> int:
+    return data[pos]
 
+def get_price(data: bytes, pos: int = 0) -> Tuple[int, int]:
+    """
+    变长价格解码，类似 UTF-8 编码的有符号数字。
+    返回 (价格增量_分, 下一个偏移).
+    对齐 pytdx helper.get_price.
+    """
+    pos_byte = 6
+    bdata = _index_bytes(data, pos)
+    int_data = bdata & 0x3F
+    if bdata & 0x40:
+        sign = True
+    else:
+        sign = False
+    if bdata & 0x80:
+        while True:
+            pos += 1
+            bdata = _index_bytes(data, pos)
+            int_data += (bdata & 0x7F) << pos_byte
+            pos_byte += 7
+            if bdata & 0x80:
+                pass
+            else:
+                break
+    pos += 1
+    if sign:
+        int_data = -int_data
+    return int_data, pos
 
-def split_code(s: str) -> tuple[int, str, str]:
-    """返回 (market_id, exchange, number)。"""
-    code = normalize_code(s)
-    # 股票格式: sz000001
-    if len(code) >= 8 and code[:2] in MARKETS and code[2:].isdigit():
-        return MARKETS[code[:2]], code[:2], code[2:]
-    # 期货格式: IF2506 (保留原样)
-    return 47, "futures", code.upper()
+# ============================================================
+# 成交量解码 — 对齐 pytdx helper.get_volume
+# ============================================================
 
+def decode_volume(vol: int) -> float:
+    """
+    变长成交量解码，IEEE-754 风格。
+    对齐 pytdx helper.get_volume.
+    """
+    logpoint = vol >> (8 * 3)
+    hleax = (vol >> (8 * 2)) & 0xFF
+    lheax = (vol >> 8) & 0xFF
+    lleax = vol & 0xFF
+    dw_ecx = logpoint * 2 - 0x7F
+    dw_edx = logpoint * 2 - 0x86
+    dw_esi = logpoint * 2 - 0x8E
+    dw_eax = logpoint * 2 - 0x96
+    if dw_ecx < 0:
+        tmp_eax = -dw_ecx
+    else:
+        tmp_eax = dw_ecx
+    dbl_xmm6 = 2.0 ** tmp_eax
+    if dw_ecx < 0:
+        dbl_xmm6 = 1.0 / dbl_xmm6
+    if hleax > 0x80:
+        dwtmpeax = dw_edx + 1
+        tmpdbl_xmm3 = 2.0 ** dwtmpeax
+        dbl_xmm0 = (2.0 ** dw_edx) * 128.0
+        dbl_xmm0 += (hleax & 0x7F) * tmpdbl_xmm3
+        dbl_xmm4 = dbl_xmm0
+    else:
+        if dw_edx >= 0:
+            dbl_xmm0 = (2.0 ** dw_edx) * hleax
+        else:
+            dbl_xmm0 = (1.0 / (2.0 ** dw_edx)) * hleax
+        dbl_xmm4 = dbl_xmm0
+    dbl_xmm3 = (2.0 ** dw_esi) * lheax
+    dbl_xmm1 = (2.0 ** dw_eax) * lleax
+    if hleax & 0x80:
+        dbl_xmm3 *= 2.0
+        dbl_xmm1 *= 2.0
+    dbl_ret = dbl_xmm6 + dbl_xmm4 + dbl_xmm3 + dbl_xmm1
+    return dbl_ret
 
-def code_wire(code: str) -> bytes:
-    """股票代码编码: [market_id, 0x00, number_ascii]。"""
-    mid, _, num = split_code(code)
-    return bytes([mid, 0]) + num.encode("ascii")
+def cut_int(data: bytes, off: int) -> Tuple[int, int]:
+    """截断整数 — 与 get_price 相同实现."""
+    val, off = get_price(data, off)
+    return val, off
 
+def get_volume(vol_raw: int) -> float:
+    """快捷调用."""
+    return decode_volume(vol_raw)
 
-# ---- 日期编解码 ----
+def get_volume2(vol_raw: int) -> float:
+    """同 get_volume."""
+    return decode_volume(vol_raw)
 
-def date_int(v: str | int | date | datetime | None = None) -> int:
-    if v is None: return int(date.today().strftime("%Y%m%d"))
-    if isinstance(v, datetime): return int(v.date().strftime("%Y%m%d"))
-    if isinstance(v, date): return int(v.strftime("%Y%m%d"))
-    if isinstance(v, int): return v
-    return int(str(v).replace("-", ""))
+# ============================================================
+# 时间编码
+# ============================================================
 
+def encode_date(year: int, month: int, day: int) -> int:
+    """编码日期为 YYYYMMDD."""
+    return year * 10000 + month * 100 + day
 
-def int_date(raw: int) -> Optional[date]:
-    try: return datetime.strptime(f"{raw:08d}", "%Y%m%d").date()
-    except ValueError: return None
+def encode_minute(hour: int, minute: int) -> int:
+    """编码时间为距午夜分钟数."""
+    return hour * 60 + minute
 
+# ============================================================
+# 代码分类与标准化
+# ============================================================
 
-RECENT_BASE = 0xFED62304
+def classify(code: str) -> tuple:
+    """分类股票代码: (market_int, exchange_str, numeric_code)."""
+    return split_code(code)
 
+def normalize_code(code: str) -> str:
+    """标准化股票代码为 sz000001 / sh600001 格式."""
+    mid, exchange, num = split_code(code)
+    return f"{exchange}{num}"
 
-def recent_selector(d: date) -> int:
-    return RECENT_BASE - d.toordinal()
-
-
-# ---- 分钟索引 <-> 时间标签 ----
-
-def minute_label(idx: int) -> str:
-    m = 9 * 60 + 30 + idx + 1 if idx < 120 else 13 * 60 + idx - 119
-    return f"{m // 60:02d}:{m % 60:02d}"
-
-
-def minute_dt(td: date, idx: int) -> datetime:
-    lb = minute_label(idx)
-    return datetime(td.year, td.month, td.day, int(lb[:2]), int(lb[3:]), tzinfo=SH_TZ)
-
-
-# ---- 品种分类 ----
-
-def classify(code: str) -> str:
-    c = normalize_code(code)
-    # 股票格式: xxNNNNNN
-    if len(c) == 8 and c[:2] in MARKETS and c[2:].isdigit():
-        if c.startswith("sh000") or c.startswith("sz399"):
-            return "index"
-        num = c[2:]
-        if c.startswith("sh51") or c.startswith("sz159") or c.startswith("sz16"):
-            return "etf"
-        return "stock"
-    # 其他均为品种代码 (期货等)
-    return "futures"

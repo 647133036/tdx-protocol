@@ -61,7 +61,8 @@ def calc_turnover(volume: int, float_shares: float) -> float:
     """计算换手率 (百分比)。"""
     if float_shares <= 0:
         return 0.0
-    return volume / (float_shares * 100) * 100  # float_shares 单位万, volume 单位股
+    # float_shares 单位: 万股, volume 单位: 股
+    return volume / (float_shares * 10000) * 100
 
 
 def parse_xdxr(equity: list[EquityChange]) -> list[dict]:
