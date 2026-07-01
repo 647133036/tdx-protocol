@@ -39,12 +39,12 @@ with StockClient() as client:
 
     # 实时行情
     quote = client.quote("600000")
-    print(f"浦发银行: ¥{quote['price']}")
+    print(f"浦发银行: ¥{quote.price}")
 
     # K线
     klines = client.kline("600000", period="day", count=10)
     for k in klines:
-        print(f"{k['datetime']}: O={k['open']} C={k['close']}")
+        print(f"{k.time}: O={k.open} C={k.close}")
 
     # 分时 / 成交
     minute = client.today_minute("600000")
