@@ -4,7 +4,7 @@
 """
 
 import time
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional, Sequence
 
 from ..tube import Tube, TubeError
@@ -309,3 +309,28 @@ class FuturesClient:
         """批量详细行情 (多品种)."""
         r = self._exec(CMD_EX_QUOTES, _b_ex_quotes(code_list))
         return _p_ex_quotes(r.data)
+
+    def get_main_contract(self, product: str = "IF", lookahead_months: int = 3) -> str | None:
+        """自动探测活跃合约。
+        
+        从当前月份起向后轮询 lookahead_months 个月，
+        返回第一个 price > 0 的合约代码。
+        """
+        now = datetime.now()
+        for offset in range(lookahead_months):
+            target = now + timedelta(days=32 * offset)
+            code = f"{product}{target.strftime('%y%m')}"
+            try:
+                q = self.quote(47, code)
+                if hasattr(q, 'price') and q.price > 0:
+                    return code
+            except Exception:
+                continue
+        return None
+
+    def safe_exec(self, func, *args, **kwargs):
+        """安全执行，捕获 remote closed 等异常并返回空数据。"""
+        try:
+            return func(*args, **kwargs)
+        except (ConnectionError, TubeError, TimeoutError, OSError):
+            return kwargs.get("_fallback", [])

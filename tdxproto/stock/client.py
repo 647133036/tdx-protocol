@@ -211,6 +211,13 @@ class StockClient:
             self.sock.send(pkg)
             return self._recv_response(self.sock)
 
+    def _safe_send_recv(self, pkg: bytes) -> bytes:
+        """安全发送接收，捕获 remote closed 等异常，返回空响应."""
+        try:
+            return self._send_recv(pkg)
+        except (ConnectionError, TimeoutError, OSError, zlib.error):
+            return b"\x00\x00"
+
     # ---- 名称缓存 ----
 
     def count(self, market: int) -> int:
@@ -367,7 +374,7 @@ class StockClient:
             eq_date = date(year, month, day) if year > 2000 else None
             result.append(EquityChange(
                 date=eq_date,
-                category=r.get("name", ""),
+                category=r.get("category", 0),
                 float_shares=r.get("panqianliutong") or r.get("panhouliutong") or r.get("suogu") or r.get("fenshu") or 0.0,
                 total_shares=r.get("qianzongguben") or r.get("houzongguben") or 0.0,
                 bonus=r.get("fenhong") or 0.0,
@@ -452,30 +459,30 @@ class StockClient:
     def auction(self, code: str):
         """集合竞价."""
         mid, _, num = split_code(code)
-        data = self._send_recv(_b_auction(mid, num))
+        data = self._safe_send_recv(_b_auction(mid, num))
         return _p_auction(data)
 
     def top_board(self, category: int = 0):
         """涨跌停板. category: 0=涨停, 1=跌停, 2=振幅, 3=涨速, 4=跌速, 5=量比, 6=正委比, 7=负委比, 8=换手."""
-        data = self._send_recv(_b_top_board(category))
+        data = self._safe_send_recv(_b_top_board(category))
         return _p_top_board(data)
 
     def quotes_list(self, category: int, start: int = 0, count: int = 80,
                     sort_type: int = 0, reverse: bool = False,
                     filter_raw: int = 0) -> dict:
         """板块行情列表."""
-        data = self._send_recv(_b_quotes_list(category, start, count, sort_type, reverse, filter_raw))
+        data = self._safe_send_recv(_b_quotes_list(category, start, count, sort_type, reverse, filter_raw))
         return _p_quotes_list(data)
 
     def unusual(self, market: int = 0, start: int = 0, count: int = 600):
         """主力监控."""
-        data = self._send_recv(_b_unusual(market, start, count))
+        data = self._safe_send_recv(_b_unusual(market, start, count))
         return _p_unusual(data)
 
     def chart_sampling(self, code: str):
         """K线采样."""
         mid, _, num = split_code(code)
-        data = self._send_recv(_b_chart_sampling_kline(mid, num))
+        data = self._safe_send_recv(_b_chart_sampling_kline(mid, num))
         return _p_chart_sampling_kline(data)
 
     def history_orders(self, code: str, tdate):
@@ -483,7 +490,7 @@ class StockClient:
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
         d = self._parse_tdate(tdate)
-        data = self._send_recv(_b_history_orders_full(mid, num, d))
+        data = self._safe_send_recv(_b_history_orders_full(mid, num, d))
         return _p_history_orders(data, coefficient=coeff)
 
     def refresh(self, codes: list[str]) -> list[dict]:

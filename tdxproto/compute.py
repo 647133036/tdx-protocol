@@ -26,7 +26,7 @@ def compute_factors(bars: list[Kline], equity: list[EquityChange],
     factors: dict[date, float] = {}
 
     for eq in eq_sorted:
-        if eq.date is None or eq.category != "除权除息":
+        if eq.date is None or eq.category != 1:
             continue
         close_before = bmap.get(eq.date)
         if not close_before or close_before.close == 0:
@@ -69,7 +69,7 @@ def parse_xdxr(equity: list[EquityChange]) -> list[dict]:
     """解析除权除息事件。"""
     events = []
     for e in sorted(equity, key=lambda x: x.date or date.min, reverse=True):
-        if e.category == "除权除息" and e.date:
+        if e.category == 1 and e.date:
             events.append({
                 "date": str(e.date),
                 "bonus_per_share": e.bonus,

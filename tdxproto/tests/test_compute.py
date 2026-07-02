@@ -15,7 +15,7 @@ class TestComputeFactors:
         assert result == {}
 
     def test_no_bars(self):
-        eq = [EquityChange(date=date(2025, 1, 1), category="除权除息", bonus=0.5)]
+        eq = [EquityChange(date=date(2025, 1, 1), category=1, bonus=0.5)]
         result = compute_factors([], eq)
         assert result == {}
 
@@ -25,7 +25,7 @@ class TestComputeFactors:
             Kline(time="20250101", close=10.5),
         ]
         eq = [
-            EquityChange(date=date(2025, 1, 1), category="除权除息",
+            EquityChange(date=date(2025, 1, 1), category=1,
                         bonus=0.5, rights=0.3, placement=0.1, placement_price=8.0)
         ]
         result = compute_factors(bars, eq, "qfq")
@@ -35,7 +35,7 @@ class TestComputeFactors:
     def test_hfq_adjust(self):
         bars = [Kline(time="20250101", close=10.0)]
         eq = [
-            EquityChange(date=date(2025, 1, 1), category="除权除息",
+            EquityChange(date=date(2025, 1, 1), category=1,
                         bonus=1.0)
         ]
         result = compute_factors(bars, eq, "hfq")
@@ -92,15 +92,14 @@ class TestCalcTurnover:
 
 class TestParseXdXr:
     def test_no_events(self):
-        eq = [EquityChange(date=date(2025, 1, 1), category="股本变化")]
+        eq = [EquityChange(date=date(2025, 1, 1), category=5)]
         result = parse_xdxr(eq)
         assert result == []
 
     def test_dividend_event(self):
         eq = [
-            EquityChange(
-                date=date(2025, 1, 1), category="除权除息",
-                bonus=0.5, rights=0.3, placement=0.1, placement_price=8.0
+            EquityChange(date=date(2025, 1, 1), category=1,
+                        bonus=0.5, rights=0.3, placement=0.1, placement_price=8.0
             )
         ]
         result = parse_xdxr(eq)
@@ -110,8 +109,8 @@ class TestParseXdXr:
 
     def test_non_dividend_category(self):
         eq = [
-            EquityChange(date=date(2025, 1, 1), category="股本变化"),
-            EquityChange(date=date(2025, 6, 1), category="股本变化"),
+            EquityChange(date=date(2025, 1, 1), category=5),
+            EquityChange(date=date(2025, 6, 1), category=5),
         ]
         result = parse_xdxr(eq)
         assert result == []
