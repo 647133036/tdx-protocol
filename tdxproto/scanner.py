@@ -221,9 +221,11 @@ def _handshake_7727(addr: str, port: int, timeout: float) -> tuple[bool, float, 
 
 
 def _parse_host(host: str) -> tuple[str, int]:
-    """从 'ip:port' 字符串解析。"""
-    addr, port_str = host.rsplit(":", 1)
-    return addr, int(port_str)
+    """从 'ip:port' 或 'ip' 字符串解析，默认 7709."""
+    if ":" in host:
+        addr, port_str = host.rsplit(":", 1)
+        return addr, int(port_str)
+    return host, 7709
 
 
 def scan_stock(hosts: list[str], *, workers: int = DEFAULT_WORKERS,

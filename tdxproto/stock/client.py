@@ -87,6 +87,29 @@ class StockClient:
     def __exit__(self, *args):
         self.close()
 
+    def _connect_once(self, host_str: str):
+        """尝试连接到指定主机并执行握手."""
+        sock = None
+        try:
+            host, port = host_str.rsplit(":", 1)
+            port = int(port)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            sock.connect((host, port))
+            sock.send(setup_cmd1())
+            self._recv_pass(sock)
+            sock.send(setup_cmd2())
+            self._recv_pass(sock)
+            sock.send(setup_cmd3())
+            self._recv_pass(sock)
+            self.sock = sock
+            self._start_heartbeat()
+        except Exception:
+            if sock:
+                try: sock.close()
+                except: pass
+            raise
+
     def connect(self):
         """连接服务器并执行 3 步握手, 支持自动故障转移。"""
         last_err = None
@@ -100,35 +123,17 @@ class StockClient:
                     hosts_to_try.insert(0, rotated.host)
 
         for host_str in hosts_to_try:
-            sock = None
             try:
-                host, port = host_str.rsplit(":", 1)
-                port = int(port)
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(self.timeout)
-                sock.connect((host, port))
-                sock.send(setup_cmd1())
-                self._recv_pass(sock)
-                sock.send(setup_cmd2())
-                self._recv_pass(sock)
-                sock.send(setup_cmd3())
-                self._recv_pass(sock)
-                self.sock = sock
-
+                self._connect_once(host_str)
                 if self._use_ip_health:
                     manager = get_manager()
                     for entry in manager.pool.entries.values():
                         if entry.host == host_str and entry.protocol == "7709":
                             self._current_host_entry = entry
                             break
-
-                self._start_heartbeat()
                 return
             except Exception as e:
                 last_err = e
-                if sock:
-                    try: sock.close()
-                    except: pass
                 if self._use_ip_health and host_str in [e.host for e in get_manager().pool.entries.values()]:
                     for entry in get_manager().pool.entries.values():
                         if entry.host == host_str and entry.protocol == "7709":
@@ -204,7 +209,7 @@ class StockClient:
         self._last_request_time = time.monotonic()
 
     def _send_recv(self, pkg: bytes) -> bytes:
-        """发送请求包并接收响应（带锁 + 速率限制）."""
+        """发送请求包并接收响应（带锁 + 速率限制 + 自动重连）."""
         with self._lock:
             if not self.sock:
                 raise ConnectionError("not connected")
@@ -214,7 +219,14 @@ class StockClient:
                 return self._recv_response(self.sock)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
                 self.sock = None
-                raise ConnectionError(f"connection lost: {e}") from e
+                if self.host and self.port:
+                    try:
+                        self._connect_once(f"{self.host}:{self.port}")
+                        self.sock.send(pkg)
+                        return self._recv_response(self.sock)
+                    except Exception:
+                        pass
+                raise ConnectionError(f"connection lost after reconnect attempt: {e}") from e
 
     def _safe_send_recv(self, pkg: bytes) -> bytes:
         """安全发送接收，捕获 remote closed 等异常，返回空响应."""
