@@ -3,6 +3,7 @@
 
 import json
 import threading
+from dataclasses import is_dataclass, asdict
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -55,6 +56,12 @@ def release_client():
             _client = None
 
 
+def dc_to_dict(obj):
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return asdict(obj)
+    return str(obj)
+
+
 class Handler(BaseHTTPRequestHandler):
     """HTTP 请求处理器."""
 
@@ -62,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
         pass  # 静默日志
 
     def _send_json(self, data, status=200):
-        body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+        body = json.dumps(data, ensure_ascii=False, default=dc_to_dict).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -471,7 +478,7 @@ function showSummary(containerId, items) {
 }
 
 function showQuoteDetail(containerId, q) {
-  const fields = ["code","name","price","pre_close","open","high","low","volume","amount",
+  const fields = ["code","name","price","last_close","open","high","low","volume","amount",
                   "bid1","ask1","bid_vol1","ask_vol1"];
   let html = '<div class="summary"><div class="row">';
   for (const f of fields) {
@@ -534,7 +541,7 @@ async function loadKline() {
     if (data.error) throw new Error(data.error);
     let html = '<div class="summary"><div class="row"><div class="item">代码: <span>' + data.code + '</span></div><div class="item">周期: <span>' + data.period + '</span></div><div class="item">数量: <span>' + data.count + '</span></div></div></div>';
     const headers = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额"];
-    const rows = data.kline.map(k => [k.datetime, k.open, k.high, k.low, k.close, k.vol, k.amount]);
+    const rows = data.kline.map(k => [k.time, k.open, k.high, k.low, k.close, k.volume, k.amount]);
     html += '<table><thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
     for (const r of rows.reverse()) {
       html += '<tr>' + r.map((v, i) => {
@@ -560,7 +567,7 @@ async function loadKlineAll() {
     if (data.error) throw new Error(data.error);
     let html = '<div class="summary"><div class="row"><div class="item">代码: <span>' + data.code + '</span></div><div class="item">周期: <span>' + data.period + '</span></div><div class="item">总条数: <span>' + data.count + '</span></div></div></div>';
     const headers = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额"];
-    const rows = data.kline.slice(-100).map(k => [k.datetime, k.open, k.high, k.low, k.close, k.vol, k.amount]);
+    const rows = data.kline.slice(-100).map(k => [k.time, k.open, k.high, k.low, k.close, k.volume, k.amount]);
     html += '<p style="color:#8b949e;margin:8px 0;">显示最近 ' + rows.length + ' 条 (共 ' + data.count + ' 条)</p>';
     html += '<table><thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
     for (const r of rows.reverse()) {
@@ -586,7 +593,7 @@ async function loadTrade() {
     if (data.error) throw new Error(data.error);
     let html = '<div class="summary"><div class="row"><div class="item">代码: <span>' + data.code + '</span></div><div class="item">数量: <span>' + data.count + '</span></div></div></div>';
     const headers = ["时间", "价格", "成交量", "笔数", "买卖方向"];
-    const rows = data.trade.map(t => [t.time, t.price, t.vol, t.num, t.buyorsell]);
+    const rows = data.trade.map(t => [t.time, t.price, t.volume, t.order_count, t.direction]);
     html += '<table><thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
     for (const r of rows) {
       html += '<tr>' + r.map(v => '<td>' + fmtNum(v) + '</td>').join('') + '</tr>';
@@ -606,10 +613,10 @@ async function loadXdxr() {
     const data = await api("/api/xdxr", "POST", {code});
     if (data.error) throw new Error(data.error);
     let html = '<div class="summary"><div class="row"><div class="item">代码: <span>' + data.code + '</span></div><div class="item">记录数: <span>' + data.count + '</span></div></div></div>';
-    const headers = ["日期", "类型", "名称", "分红", "送转股", "流通股本", "总股本"];
+    const headers = ["日期", "类型", "分红", "送转股", "配股", "配股价", "流通股", "总股本"];
     const rows = data.xdxr.map(e => [
-      e.year ? e.year + "-" + String(e.month||1).padStart(2,"0") + "-" + String(e.day||1).padStart(2,"0") : "-",
-      e.category, e.name, e.fenhong, e.songzhuangu, e.panhouliutong, e.houzongguben
+      e.date ? String(e.date) : "-",
+      e.category, e.bonus, e.rights, e.placement, e.placement_price, e.float_shares, e.total_shares
     ]);
     html += '<table><thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
     for (const r of rows) {
