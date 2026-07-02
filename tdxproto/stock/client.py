@@ -158,7 +158,10 @@ class StockClient:
     def _sock_read(s: socket.socket, n: int) -> bytes:
         buf = bytearray()
         while len(buf) < n:
-            chunk = s.recv(n - len(buf))
+            try:
+                chunk = s.recv(n - len(buf))
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+                raise ConnectionError(f"recv failed: {e}") from e
             if not chunk:
                 raise ConnectionError("remote closed")
             buf.extend(chunk)
