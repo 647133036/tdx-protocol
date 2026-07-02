@@ -208,8 +208,12 @@ class StockClient:
             if not self.sock:
                 raise ConnectionError("not connected")
             self._throttle()
-            self.sock.send(pkg)
-            return self._recv_response(self.sock)
+            try:
+                self.sock.send(pkg)
+                return self._recv_response(self.sock)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+                self.sock = None
+                raise ConnectionError(f"connection lost: {e}") from e
 
     def _safe_send_recv(self, pkg: bytes) -> bytes:
         """安全发送接收，捕获 remote closed 等异常，返回空响应."""
