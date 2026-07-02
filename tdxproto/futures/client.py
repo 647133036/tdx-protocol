@@ -1,9 +1,13 @@
-"""7727 期货行情客户端。"""
+"""7727 期货行情客户端。
 
+基于扫描结果动态调整服务器IP，支持自动故障转移和健康评分。
+"""
+
+import time
 from datetime import date
 from typing import Optional, Sequence
 
-from ..tube import Tube
+from ..tube import Tube, TubeError
 from ..models import Quote, Kline, Minute, Trade
 from ..ip_health import get_manager
 from .commands import (
@@ -33,47 +37,163 @@ class FuturesClient:
     def __init__(self, hosts: list[str] | None = None, timeout: float = 8.0,
                  scanner_hosts: list[str] | None = None, use_ip_health: bool = True):
         self._use_ip_health = use_ip_health
-        
-        if hosts:
-            tube_hosts = hosts
-        elif use_ip_health:
+        self._scanner_hosts = scanner_hosts or FUTURES_HOSTS_LARGE
+        self._hosts_override = hosts
+        self._timeout = timeout
+        self._tube: Tube | None = None
+        self._current_host_entry = None
+
+    def _resolve_hosts(self) -> list[str]:
+        """根据 ip_health 评分或静态列表解析主机列表。"""
+        if self._hosts_override:
+            return self._hosts_override
+        if self._use_ip_health:
             manager = get_manager()
             best = manager.get_best_futures_host()
             if best:
-                tube_hosts = [best.host]
-            else:
-                tube_hosts = FUTURES_HOSTS
-        else:
-            tube_hosts = FUTURES_HOSTS
-            
-        self._tube = Tube(
-            hosts=tube_hosts, timeout=timeout,
+                return [best.host]
+            return FUTURES_HOSTS
+        return FUTURES_HOSTS
+
+    def _create_tube(self, hosts: list[str] | None = None) -> Tube:
+        if hosts is None:
+            hosts = self._resolve_hosts()
+        return Tube(
+            hosts=hosts, timeout=self._timeout,
             heartbeat_cmd=CMD_EX_HEARTBEAT, heartbeat_data=_b_ex_heartbeat(0),
         )
-        self._scanner_hosts = scanner_hosts or FUTURES_HOSTS_LARGE
-        self._current_host_entry = None
+
+    def _feed_scan_to_ip_health(self):
+        """从扫描器获取结果并写入 ip_health 池。"""
+        if not self._use_ip_health:
+            return
+        try:
+            from ..scanner import scan_futures
+            results = scan_futures(
+                self._scanner_hosts, workers=64, timeout=0.5)
+            manager = get_manager()
+            for r in results:
+                existing = manager.pool.entries.get(r.host)
+                if existing:
+                    existing.update(r)
+                else:
+                    from ..ip_health import HostEntry
+                    manager.pool.add(HostEntry.from_probe(r, "7727"))
+            manager.save_cache()
+        except Exception:
+            pass
+
+    def _connect(self):
+        """建立连接，集成扫描评分和故障转移。"""
+        if self._tube is not None:
+            try:
+                self._tube.close()
+            except Exception:
+                pass
+            self._tube = None
+
+        # 先尝试扫描，但如果超时则回退到缓存
+        if self._use_ip_health:
+            self._feed_scan_to_ip_health()
+
+        hosts_to_try = list(self._resolve_hosts())
+
+        if self._use_ip_health and self._current_host_entry is not None:
+            manager = get_manager()
+            if self._current_host_entry.consecutive_failures >= 3:
+                try:
+                    rotated = manager.rotate_futures_host(self._current_host_entry)
+                    if rotated.host not in hosts_to_try:
+                        hosts_to_try.insert(0, rotated.host)
+                except RuntimeError:
+                    pass
+
+        # 如果没有可用主机，先尝试缓存的 hosts 作为快速回退
+        if not hosts_to_try:
+            hosts_to_try = list(FUTURES_HOSTS)
+
+        self._tube = self._create_tube(hosts=hosts_to_try)
+
+        try:
+            self._tube.open(PREFIX, CMD_EX_HANDSHAKE, HANDSHAKE_DATA,
+                            scalar_hosts=self._scanner_hosts)
+        except TubeError as e:
+            self._mark_host_failed(None)
+            self._tube.close()
+            self._tube = None
+            raise TubeError(f"failed to connect to any futures host: {e}") from None
+
+        self._update_host_entry_on_success()
+
+    def _mark_host_failed(self, host_str: str | None):
+        if not self._use_ip_health:
+            return
+        target = host_str or (self._tube.host if self._tube else None)
+        if not target:
+            return
+        manager = get_manager()
+        for entry in manager.pool.entries.values():
+            if entry.host == target and entry.protocol == "7727":
+                entry.consecutive_failures += 1
+                entry.total_checks += 1
+                entry.last_check = time.time()
+                if entry.consecutive_failures >= 3:
+                    entry.status = "down"
+                elif entry.consecutive_failures >= 1:
+                    entry.status = "degraded"
+                self._current_host_entry = entry
+                manager.save_cache()
+                return
+
+    def _update_host_entry_on_success(self):
+        if not self._use_ip_health or not self._tube or not self._tube.host:
+            return
+        manager = get_manager()
+        for entry in manager.pool.entries.values():
+            if entry.host == self._tube.host and entry.protocol == "7727":
+                entry.consecutive_failures = 0
+                entry.last_check = time.time()
+                if entry.handshake_ok:
+                    entry.status = "ok" if entry.handshake_latency_ms < 200 else "degraded"
+                self._current_host_entry = entry
+                manager.save_cache()
+                return
+
+    def reconnect(self):
+        """根据最新扫描结果重新连接。"""
+        self._connect()
 
     def __enter__(self):
-        self._tube.open(PREFIX, CMD_EX_HANDSHAKE, HANDSHAKE_DATA,
-                        scalar_hosts=self._scanner_hosts)
-        
-        # 更新当前主机记录
-        if self._use_ip_health:
-            manager = get_manager()
-            for entry in manager.pool.entries.values():
-                if entry.host == self._tube.host and entry.protocol == "7727":
-                    self._current_host_entry = entry
-                    break
-        
+        self._connect()
         return self
 
-    def __exit__(self, *a): self._tube.close()
-    def close(self): self._tube.close()
-    @property
-    def host(self): return self._tube.host
+    def __exit__(self, *a):
+        if self._tube:
+            self._tube.close()
+            self._tube = None
 
-    def _exec(self, cmd: int, payload: bytes):
-        return self._tube.call(cmd, payload, PREFIX)
+    def close(self):
+        if self._tube:
+            self._tube.close()
+            self._tube = None
+
+    @property
+    def host(self):
+        return self._tube.host if self._tube else None
+
+    @property
+    def ip_health_entry(self):
+        return self._current_host_entry
+
+    def _exec(self, cmd: int, payload: bytes, _retry: int = 0):
+        try:
+            return self._tube.call(cmd, payload, PREFIX)
+        except TubeError as e:
+            self._mark_host_failed(self._tube.host if self._tube else None)
+            if _retry >= 1:
+                raise
+            self._connect()
+            return self._exec(cmd, payload, _retry=_retry + 1)
 
     # -- 市场/代码 --
     def markets(self) -> list[dict]:

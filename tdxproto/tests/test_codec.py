@@ -94,14 +94,14 @@ class TestNormalizeCode:
         assert normalize_code("sz000001") == "sz000001"
 
     def test_six_digit_auto_sz(self):
-        assert normalize_code("000001") == "sh000001"
+        assert normalize_code("000001") == "sz000001"
 
     def test_six_digit_auto_sh(self):
         assert normalize_code("600000") == "sh600000"
         assert normalize_code("690000") == "sh690000"
 
     def test_six_digit_auto_bj(self):
-        assert normalize_code("830000") == "sh830000"
+        assert normalize_code("830000") == "bj830000"
 
     def test_futures(self):
         code = normalize_code("if2506")

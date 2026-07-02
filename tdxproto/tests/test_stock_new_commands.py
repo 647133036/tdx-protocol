@@ -8,11 +8,11 @@ from tdxproto.stock.commands import (
     _b_vol_profile, _b_index_momentum, _b_index_info,
     _b_quotes_detail, _b_tick_chart, _b_auction,
     _b_top_board, _b_quotes_list, _b_unusual,
-    _b_chart_sampling, _b_history_orders,
+    _b_chart_sampling_kline, _b_history_orders_full,
     _p_vol_profile, _p_index_momentum, _p_index_info,
     _p_quotes_detail, _p_tick_chart, _p_auction,
     _p_top_board, _p_quotes_list, _p_unusual,
-    _p_chart_sampling, _p_history_orders,
+    _p_chart_sampling_kline, _p_history_orders,
 )
 
 
@@ -86,13 +86,13 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(dl, 10)
 
     def test_chart_sampling(self):
-        pkt = _b_chart_sampling(1, "000001")
+        pkt = _b_chart_sampling_kline(1, "000001")
         cmd, dl, _ = self._parse_frame(pkt)
         self.assertEqual(cmd, 0xFD1)
         self.assertEqual(dl, 37)
 
     def test_history_orders(self):
-        pkt = _b_history_orders(1, "000001", 20260630)
+        pkt = _b_history_orders_full(1, "000001", 20260630)
         cmd, dl, _ = self._parse_frame(pkt)
         self.assertEqual(cmd, 0x0FB4)
         self.assertEqual(dl, 11)
@@ -165,14 +165,14 @@ class TestParsers(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_chart_sampling_empty(self):
-        result = _p_chart_sampling(b"")
+        result = _p_chart_sampling_kline(b"")
         self.assertEqual(result, [])
 
     def test_chart_sampling_with_prices(self):
         # Response format: <H6s16xHH6xHfH + f*count
         data = struct.pack("<H6s16xHH6xHfH", 1, b"000001", 0, 0, 1, 100.0, 1)
         data += struct.pack("<f", 101.5)
-        result = _p_chart_sampling(data)
+        result = _p_chart_sampling_kline(data)
         self.assertEqual(len(result), 1)
         self.assertAlmostEqual(result[0], 101.5, places=1)
 

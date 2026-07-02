@@ -48,6 +48,7 @@ CMD_BLOCK_INFO_META = 0x06C5
 CMD_BLOCK_INFO = 0x06B9
 CMD_REPORT_FILE = 0x04B9
 CMD_VOL_PROFILE = 0x051A
+CMD_AUX = 0x051B
 CMD_INDEX_MOMENTUM = 0x051C
 CMD_INDEX_INFO = 0x051D
 CMD_AUCTION = 0x056A
@@ -249,7 +250,7 @@ def _b_limits(start: int = 0, count: int = 2000) -> bytes:
     """涨跌停限制 (0x0452)."""
     return struct.pack("<IIIH", start, count, 1, 0)
 
-def _b_chart_sampling(market: int, code: str) -> bytes:
+def _b_chart_sampling_sparkline(market: int, code: str) -> bytes:
     """小走势图 (0xFD1)."""
     if isinstance(code, str):
         code = code.encode("utf-8")
@@ -261,6 +262,7 @@ def _b_chart_sampling(market: int, code: str) -> bytes:
     pkg = bytearray(struct.pack("<HIHHIIHH", *val))
     pkg.extend(payload)
     return bytes(pkg)
+
 
 def _b_history_orders(market: int, code: str) -> bytes:
     """历史委托 (0xFB4)."""
@@ -291,6 +293,17 @@ def _b_index_momentum(market: int, code: str) -> bytes:
     if isinstance(code, str):
         code = code.encode("utf-8")
     cmd = 0x051C
+    pkgdatalen = 19
+    val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, cmd, 0, 0, 1)
+    pkg = bytearray(struct.pack("<HIHHIIHH", *val))
+    pkg.extend(struct.pack("<B6s", market, code))
+    return bytes(pkg)
+
+def _b_aux(market: int, code: str) -> bytes:
+    """分时副图."""
+    if isinstance(code, str):
+        code = code.encode("utf-8")
+    cmd = 0x051B
     pkgdatalen = 19
     val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, cmd, 0, 0, 1)
     pkg = bytearray(struct.pack("<HIHHIIHH", *val))
@@ -383,7 +396,7 @@ def _b_unusual(market: int, start: int = 0, count: int = 600) -> bytes:
     pkg = bytearray(struct.pack("<HIHHIIHH", *val))
     return bytes(pkg)
 
-def _b_chart_sampling(market: int, code: str) -> bytes:
+def _b_chart_sampling_kline(market: int, code: str) -> bytes:
     """K线采样."""
     if isinstance(code, str):
         code = code.encode("utf-8")
@@ -396,7 +409,7 @@ def _b_chart_sampling(market: int, code: str) -> bytes:
     pkg.extend(payload)
     return bytes(pkg)
 
-def _b_history_orders(market: int, code: str, tdate: int) -> bytes:
+def _b_history_orders_full(market: int, code: str, tdate: int) -> bytes:
     """历史委托."""
     if isinstance(code, str):
         code = code.encode("utf-8")
@@ -526,7 +539,7 @@ def _p_snapshot(data: bytes, coefficient: float = 0.01) -> list[dict]:
 def _cal_price(base_p, diff, coefficient=0.01):
     return float(base_p + diff) * coefficient
 
-def _p_kline(data: bytes, category: int, code: str = None) -> list[dict]:
+def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetSecurityBarsCmd.parseResponse.
     
     股票K线格式: date(4) + OHLC(4xget_price) + vol(4) + amt(4)
@@ -882,6 +895,17 @@ def _p_index_momentum(data: bytes) -> list[int]:
         result.append(start_mom)
     return result
 
+def _p_aux(data: bytes, coefficient: float = 0.01) -> list[dict]:
+    """分时副图."""
+    count, = struct.unpack("<H", data[:2])
+    pos = 2
+    result = []
+    for _ in range(count):
+        price, pos = get_price(data, pos)
+        vol, pos = get_price(data, pos)
+        result.append({"price": price * coefficient, "vol": vol})
+    return result
+
 def _p_index_info(data: bytes, coefficient: float = 0.01) -> dict:
     """指数成分股/行情."""
     pos = 0
@@ -1104,7 +1128,7 @@ def _p_quotes_list(data: bytes, coefficient: float = 0.01) -> list[dict]:
         stocks.append({
             "market": market,
             "code": code.decode("gbk").strip("\x00"),
-            "close": (price + (1 if price > 0 else 0)) * coefficient,
+            "close": price * coefficient,
             "open": (price + open_p) * coefficient,
             "high": (price + high) * coefficient,
             "low": (price + low) * coefficient,
@@ -1155,7 +1179,7 @@ def _p_unusual(data: bytes) -> list[dict]:
         })
     return results
 
-def _p_chart_sampling(data: bytes) -> list[float]:
+def _p_chart_sampling_kline(data: bytes) -> list[float]:
     """K线采样."""
     if len(data) < 42:
         return []
@@ -1281,7 +1305,7 @@ def _p_limits(data: bytes) -> list[dict]:
         })
     return result
 
-def _p_chart_sampling(data: bytes) -> list[float]:
+def _p_chart_sampling_sparkline(data: bytes) -> list[float]:
     """小走势图 (0xFD1)."""
     if len(data) < 42:
         return []

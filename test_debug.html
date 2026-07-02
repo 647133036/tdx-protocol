@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Debug Test</title></head>
+<body>
+<h1>Debug Test</h1>
+<div id="result"></div>
+<script>
+async function test() {
+    const result = document.getElementById('result');
+    result.innerHTML = 'Step 1: Starting...<br>';
+    
+    try {
+        result.innerHTML += 'Step 2: Fetching API...<br>';
+        const resp = await fetch('/api/kline?code=sh600000&period=day&count=2');
+        result.innerHTML += 'Step 3: Got response, status=' + resp.status + '<br>';
+        
+        const data = await resp.json();
+        result.innerHTML += 'Step 4: Parsed JSON, count=' + data.count + '<br>';
+        
+        result.innerHTML += 'Step 5: Data:<br>';
+        for (const k of data.kline) {
+            result.innerHTML += '  ' + k.datetime + ' O=' + k.open + ' C=' + k.close + ' Vol=' + k.vol + '<br>';
+        }
+    } catch(e) {
+        result.innerHTML += 'ERROR: ' + e.message + '<br>';
+        result.innerHTML += 'Stack: ' + e.stack + '<br>';
+    }
+}
+test();
+</script>
+</body>
+</html>

@@ -20,8 +20,16 @@ def split_code(code: str) -> Tuple[int, str, str]:
         num = code[2:]
     else:
         num = code[:6]
-        if num.startswith(("6", "9", "5", "0", "8", "1", "2", "3")):
+        if num.startswith(("60", "68", "69")):
             exchange = "sh"
+        elif num.startswith(("8", "4")):
+            exchange = "bj"
+        elif num.startswith(("00", "30", "15", "16", "39")):
+            exchange = "sz"
+        elif num.startswith(("5", "9")):
+            exchange = "sh"
+        elif num.startswith(("1", "2")):
+            exchange = "sz"
         else:
             exchange = "sz"
     mid = {"sz": 0, "sh": 1, "bj": 2}.get(exchange, 0)
