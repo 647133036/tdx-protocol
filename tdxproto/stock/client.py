@@ -9,10 +9,11 @@ import struct
 import time
 import threading
 import zlib
+from datetime import date
 from typing import Optional, Sequence
 
 from ..codec import split_code, decode_volume, get_price, u32, int_date, normalize_code
-from ..models import EquityChange
+from ..models import EquityChange, Kline, Minute, Trade
 from ..ip_health import get_manager, HostManager
 from .commands import (
     setup_cmd1, setup_cmd2, setup_cmd3,
@@ -279,15 +280,42 @@ class StockClient:
         return quote_data
 
     def kline(self, code: str, period: str = "day", start: int = 0, count: int = 800,
-              adjust: str = "", anchor: str = ""):
+              adjust: str = "", anchor: str = "") -> list[Kline]:
         """获取K线数据."""
         mid, _, num = split_code(code)
         cat = KLINE_CAT.get(period, 9)
         coeff = self._get_coefficient(mid, num)
         data = self._send_recv(_b_kline(mid, num, cat, start, count))
-        return _p_kline(data, cat, code, coefficient=coeff)
+        rows = _p_kline(data, cat, code, coefficient=coeff)
+        result = []
+        for r in rows:
+            y = r.get('year', 0)
+            m = r.get('month', 1)
+            d = r.get('day', 1)
+            h = r.get('hour', 0)
+            mn = r.get('minute', 0)
+            if period == 'day':
+                time_str = f"{y:04d}{m:02d}{d:02d}"
+            elif period == 'week':
+                time_str = f"{y:04d}{m:02d}{d:02d}"
+            elif period == 'month':
+                time_str = f"{y:04d}{m:02d}{d:02d}"
+            else:
+                time_str = f"{y:04d}{m:02d}{d:02d}{h:02d}{mn:02d}"
+            result.append(Kline(
+                time=time_str,
+                open=r.get('open', 0.0),
+                high=r.get('high', 0.0),
+                low=r.get('low', 0.0),
+                close=r.get('close', 0.0),
+                volume=int(r.get('vol', 0)),
+                amount=r.get('amount', 0.0),
+                position=r.get('position', 0),
+                settlement=r.get('settlement', 0.0),
+            ))
+        return result
 
-    def kline_all(self, code: str, period: str = "day", adjust: str = "") -> list[dict]:
+    def kline_all(self, code: str, period: str = "day", adjust: str = "") -> list[Kline]:
         """自动翻页拉取全量K线."""
         mid, _, num = split_code(code)
         cat = KLINE_CAT.get(period, 9)
@@ -298,14 +326,38 @@ class StockClient:
         empty_pages = 0
         while empty_pages < 3:
             data = self._send_recv(_b_kline(mid, num, cat, start, batch_size))
-            bars = _p_kline(data, cat, code, coefficient=coeff)
-            if not bars:
+            rows = _p_kline(data, cat, code, coefficient=coeff)
+            for r in rows:
+                y = r.get('year', 0)
+                m = r.get('month', 1)
+                d = r.get('day', 1)
+                h = r.get('hour', 0)
+                mn = r.get('minute', 0)
+                if period == 'day':
+                    time_str = f"{y:04d}{m:02d}{d:02d}"
+                elif period == 'week':
+                    time_str = f"{y:04d}{m:02d}{d:02d}"
+                elif period == 'month':
+                    time_str = f"{y:04d}{m:02d}{d:02d}"
+                else:
+                    time_str = f"{y:04d}{m:02d}{d:02d}{h:02d}{mn:02d}"
+                all_bars.append(Kline(
+                    time=time_str,
+                    open=r.get('open', 0.0),
+                    high=r.get('high', 0.0),
+                    low=r.get('low', 0.0),
+                    close=r.get('close', 0.0),
+                    volume=int(r.get('vol', 0)),
+                    amount=r.get('amount', 0.0),
+                    position=r.get('position', 0),
+                    settlement=r.get('settlement', 0.0),
+                ))
+            if not rows:
                 empty_pages += 1
                 start += batch_size
                 continue
-            all_bars.extend(bars)
-            start += len(bars)
-            if len(bars) < batch_size:
+            start += len(rows)
+            if len(rows) < batch_size:
                 break
             empty_pages = 0
         return all_bars
@@ -337,33 +389,37 @@ class StockClient:
         """股本变迁 (兼容旧接口名)."""
         return self.xdxr(code)
 
-    def today_minute(self, code: str) :
+    def today_minute(self, code: str) -> list[Minute]:
         """今日分时."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
         data = self._send_recv(_b_today_minute(mid, num))
-        return _p_today_minute(data, coefficient=coeff)
+        rows = _p_today_minute(data, coefficient=coeff)
+        return [Minute(time=str(r.get('minute', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), avg_price=r.get('avg_price', 0.0)) for r in rows]
 
-    def history_minute(self, code: str, tdate) :
+    def history_minute(self, code: str, tdate) -> list[Minute]:
         """历史分时."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
         d = self._parse_tdate(tdate)
         data = self._send_recv(_b_history_minute(mid, num, d))
-        return _p_history_minute(data, coefficient=coeff)
+        rows = _p_history_minute(data, coefficient=coeff)
+        return [Minute(time=str(r.get('minute', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), avg_price=r.get('avg_price', 0.0)) for r in rows]
 
-    def today_trade(self, code: str, start: int = 0, count: int = 115) :
+    def today_trade(self, code: str, start: int = 0, count: int = 115) -> list[Trade]:
         """今日分笔."""
         mid, _, num = split_code(code)
         data = self._send_recv(_b_today_trade(mid, num, start, count))
-        return _p_today_trade(data)
+        rows = _p_today_trade(data)
+        return [Trade(time=str(r.get('time', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), direction=r.get('type', ''), nature=r.get('nature', '')) for r in rows]
 
-    def history_trade(self, code: str, tdate, start: int = 0, count: int = 900) :
+    def history_trade(self, code: str, tdate, start: int = 0, count: int = 900) -> list[Trade]:
         """历史分笔."""
         mid, _, num = split_code(code)
         d = self._parse_tdate(tdate)
         data = self._send_recv(_b_history_trade(mid, num, start, count, d))
-        return _p_history_trade(data)
+        rows = _p_history_trade(data)
+        return [Trade(time=str(r.get('time', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), direction=r.get('type', ''), nature=r.get('nature', '')) for r in rows]
 
     def xdxr(self, code: str) -> list[EquityChange]:
         """除权除息信息."""

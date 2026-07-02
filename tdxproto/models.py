@@ -59,6 +59,7 @@ class Kline:
 
 
 @dataclass
+@dataclass
 class Minute:
     time: str
     price: float = 0.0
