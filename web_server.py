@@ -19,8 +19,32 @@ def get_client():
         with _client_lock:
             if _client is None or _client.sock is None:
                 _client = StockClient(timeout=5, rate_limit=0.5)
-                _client.connect()
+                try:
+                    _client.connect()
+                except Exception:
+                    _client = None
+                    raise
     return _client
+
+
+def _retry_on_conn_error(handler_func):
+    """装饰器: 捕获 ConnectionError 并重试一次 get_client()."""
+    def wrapper(*args, **kwargs):
+        self = args[0]
+        try:
+            return handler_func(*args, **kwargs)
+        except ConnectionError:
+            # 重置全局客户端, 重试
+            global _client
+            with _client_lock:
+                if _client:
+                    _client.close()
+                    _client = None
+            try:
+                return handler_func(*args, **kwargs)
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+    return wrapper
 
 
 def release_client():
@@ -98,37 +122,22 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_status(self):
         self._send_json({"status": "ok", "connected": True})
 
+    @_retry_on_conn_error
     def _handle_count(self):
-        try:
-            c = get_client()
-            sz = c.count(0)
-            sh = c.count(1)
-            self._send_json({"sz_count": sz, "sh_count": sh})
-        except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+        c = get_client()
+        sz = c.count(0)
+        sh = c.count(1)
+        self._send_json({"sz_count": sz, "sh_count": sh})
 
+    @_retry_on_conn_error
     def _handle_quote(self):
         params = parse_qs(urlparse(self.path).query)
         code = params.get("code", ["sh600000"])[0]
-        try:
-            c = get_client()
-            q = c.quote(code)
-            self._send_json({"code": code, "quote": q})
-        except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+        c = get_client()
+        q = c.quote(code)
+        self._send_json({"code": code, "quote": q})
 
-    def _handle_kline(self):
-        params = parse_qs(urlparse(self.path).query)
-        code = params.get("code", ["sh600000"])[0]
-        period = params.get("period", ["day"])[0]
-        count = int(params.get("count", ["50"])[0])
-        try:
-            c = get_client()
-            bars = c.kline(code, period=period, start=0, count=count)
-            self._send_json({"code": code, "period": period, "count": len(bars), "kline": bars})
-        except Exception as e:
-            self._send_json({"error": str(e)}, 500)
-
+    @_retry_on_conn_error
     def _handle_kline_all(self, body=None):
         try:
             if body:
@@ -146,6 +155,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
+    @_retry_on_conn_error
     def _handle_codes(self, body=None):
         try:
             if body:
@@ -161,6 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
+    @_retry_on_conn_error
     def _handle_xdxr(self, body=None):
         try:
             if body:
@@ -176,6 +187,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
+    @_retry_on_conn_error
     def _handle_finance(self, body=None):
         try:
             if body:
@@ -191,6 +203,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
 
+    @_retry_on_conn_error
     def _handle_trade(self, body=None):
         try:
             if body:
@@ -205,6 +218,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"code": code, "count": len(trades), "trade": trades})
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
+
+    @_retry_on_conn_error
+    def _handle_kline(self):
+        params = parse_qs(urlparse(self.path).query)
+        code = params.get("code", ["sh600000"])[0]
+        period = params.get("period", ["day"])[0]
+        count = int(params.get("count", ["50"])[0])
+        c = get_client()
+        bars = c.kline(code, period=period, start=0, count=count)
+        self._send_json({"code": code, "period": period, "count": len(bars), "kline": bars})
 
     def _send_error(self, code, message):
         self._send_json({"error": message}, code)
