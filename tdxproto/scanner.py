@@ -149,13 +149,8 @@ def _handshake_7709(addr: str, port: int, timeout: float) -> tuple[bool, float, 
 
 def _handshake_7727(addr: str, port: int, timeout: float) -> tuple[bool, float, str | None]:
     """7727 期货协议握手: 1 步握手 (0x2454 + 80B magic)."""
-    handshake_data = bytes.fromhex(
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-        "cce16dffd5ba3fb8" "cbc57a054f7748ea"
-    )
+    from .futures.commands import HANDSHAKE_DATA
+    handshake_data = HANDSHAKE_DATA
     
     try:
         sock = socket.create_connection((addr, port), timeout=timeout)

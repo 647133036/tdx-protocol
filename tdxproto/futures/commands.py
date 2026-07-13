@@ -55,7 +55,7 @@ HANDSHAKE_DATA = bytes.fromhex(
     "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
     "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
     "1f32c6e5d53dfb41" "1f32c6e5d53dfb41"
-    "cce16dffd5ba3fb8" "cbc57a054f7748ea"
+    "0000000000000000" "0000000000000000"
 )
 
 from ..hosts import FUTURES_HOSTS_FAST as FUTURES_HOSTS

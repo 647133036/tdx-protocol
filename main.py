@@ -59,7 +59,13 @@ def stock_codes(c, a):
 
 def stock_quote(c, a):
     codes = [x.strip() for x in a.codes.split(",")]
-    js(c.quote(codes))
+    result = []
+    for code in codes:
+        try:
+            result.append(c.quote(code))
+        except Exception as e:
+            result.append({"code": code, "error": str(e)})
+    js(result)
 
 def stock_kline(c, a):
     js(c.kline(a.code, a.period, a.start, a.count, a.adjust, a.anchor or ""))
@@ -98,7 +104,13 @@ def stock_equity(c, a):
 
 def stock_finance(c, a):
     codes = [x.strip() for x in a.codes.split(",")]
-    js(c.finance(codes))
+    result = []
+    for code in codes:
+        try:
+            result.append(c.finance(code))
+        except Exception as e:
+            result.append({"code": code, "error": str(e)})
+    js(result)
 
 def stock_limits(c, a): js(c.limits(a.start))
 
@@ -164,7 +176,13 @@ def fut_trade(c, a):
 
 def etf_quote(c, a):
     codes = [x.strip() for x in a.codes.split(",")]
-    js(c.quote(codes))
+    result = []
+    for code in codes:
+        try:
+            result.append(c.quote(code))
+        except Exception as e:
+            result.append({"code": code, "error": str(e)})
+    js(result)
 
 
 # ========== Scan ==========

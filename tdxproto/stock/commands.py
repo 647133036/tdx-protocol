@@ -350,17 +350,16 @@ def _b_tick_chart(market: int, code: str, start: int = 0, count: int = 0xBA00) -
     pkg.extend(struct.pack("<HH", start, count))
     return bytes(pkg)
 
-def _b_auction(market: int, code: str, start: int = 0, count: int = 500) -> bytes:
+def _b_auction(market: int, code: str, start: int = 0, count: int = 500, mode: int = 3) -> bytes:
     """集合竞价."""
     if isinstance(code, str):
         code = code.encode("utf-8")
     cmd = 0x056A
-    # Payload: <H 6s I I I I I = 2+6+4+4+4+4+4 = 28B
     pkgdatalen = 28
     val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, cmd, market, 0, 0)
     pkg = bytearray(struct.pack("<HIHHIIHH", *val))
     pkg.extend(code.ljust(6, b"\x00"))
-    pkg.extend(struct.pack("<IIIII", 0, 3, 0, start, count))
+    pkg.extend(struct.pack("<IIIII", 0, mode, 0, start, count))
     return bytes(pkg)
 
 def _b_top_board(category: int, size: int = 20) -> bytes:
@@ -735,8 +734,8 @@ def _p_finance(data: bytes) -> dict:
     pos += 2  # skip count
     market, code = struct.unpack("<B6s", data[pos:pos+7])
     pos += 7
-    fmt = "<fHHIIffffffffffffffffffffffffffffff"
-    vals = struct.unpack(fmt, data[pos:pos+struct.calcsize(fmt)])
+    fmt = "<fHHII" + "f" * 30
+    vals = struct.unpack(fmt, data[pos:pos + struct.calcsize(fmt)])
     keys = [
         "liutongguben", "province", "industry", "updated_date", "ipo_date",
         "zongguben", "guojiagu", "faqirenfarengu", "farengu", "bgu", "hgu",
@@ -1250,11 +1249,11 @@ def _p_quotes_encrypt(data: bytes, coefficient: float = 0.01) -> list[dict]:
             asks.append({"price": ask * coefficient, "vol": ask_vol})
         u2, u3, u4 = struct.unpack("<HII", data[pos:pos+10]); pos += 10
         for _ in range(6):
-            get_price(data, pos); pos  # skip 24 bytes
+            _, pos = get_price(data, pos)
         from datetime import time as dt_time
         result.append({
-            "market": MARKET(market),
-            "code": code.decode("gbk"),
+            "market": market,
+            "code": code.decode("gbk").strip("\x00"),
             "active": active,
             "close": close * coefficient,
             "pre_close": (close + pre_close) * coefficient,

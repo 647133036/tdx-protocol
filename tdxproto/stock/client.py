@@ -75,6 +75,8 @@ class StockClient:
         self._name_map_loaded: set[int] = set()
         self._use_ip_health = use_ip_health
         self._current_host_entry = None
+        self._current_host = None
+        self._current_port = None
         self._rate_limit = rate_limit
         self._last_request_time: float = 0.0
         self._stop_heartbeat = threading.Event()
@@ -93,6 +95,8 @@ class StockClient:
         try:
             host, port = host_str.rsplit(":", 1)
             port = int(port)
+            self._current_host = host
+            self._current_port = port
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.timeout)
             sock.connect((host, port))
@@ -222,9 +226,9 @@ class StockClient:
                 return self._recv_response(self.sock)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
                 self.sock = None
-                if self.host and self.port:
+                if self._current_host and self._current_port:
                     try:
-                        self._connect_once(f"{self.host}:{self.port}")
+                        self._connect_once(f"{self._current_host}:{self._current_port}")
                         self.sock.send(pkg)
                         return self._recv_response(self.sock)
                     except Exception:
@@ -531,10 +535,10 @@ class StockClient:
         data = self._send_recv(_b_tick_chart(mid, num, start, count))
         return _p_tick_chart(data, coefficient=coeff)
 
-    def auction(self, code: str):
+    def auction(self, code: str, mode: int = 3):
         """集合竞价."""
         mid, _, num = split_code(code)
-        data = self._safe_send_recv(_b_auction(mid, num))
+        data = self._safe_send_recv(_b_auction(mid, num, mode=mode))
         return _p_auction(data)
 
     def top_board(self, category: int = 0):
@@ -577,10 +581,13 @@ class StockClient:
         data = self._send_recv(_b_quotes_encrypt(stocks))
         return _p_quotes_encrypt(data)
 
-    def recent_minute(self, code: str, tdate) -> list[dict]:
+    def recent_minute(self, code: str, tdate=None) -> list[dict]:
         """近期分时 / 历史tick (0x0FEB)."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
+        if tdate is None:
+            from datetime import date as dt_date
+            tdate = int(dt_date.today().strftime("%Y%m%d"))
         d = self._parse_tdate(tdate)
         data = self._send_recv(_b_recent_minute(mid, num, d))
         return _p_recent_minute(data, coefficient=coeff)

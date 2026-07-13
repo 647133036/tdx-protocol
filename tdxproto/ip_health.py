@@ -232,17 +232,17 @@ class HostManager:
             entry = HostEntry.from_probe(result, "7709")
             existing = self.pool.entries.get(result.host)
             if existing:
-                entry.update(result)
+                existing.update(result)
             else:
                 self.pool.add(entry)
-        
+
         # 扫描期货服务器
         futures_results = scan_futures(futures_hosts, workers=workers, timeout=timeout)
         for result in futures_results:
             entry = HostEntry.from_probe(result, "7727")
             existing = self.pool.entries.get(result.host)
             if existing:
-                entry.update(result)
+                existing.update(result)
             else:
                 self.pool.add(entry)
         

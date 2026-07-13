@@ -124,10 +124,7 @@ def decode_volume(vol: int) -> float:
         dbl_xmm0 += (hleax & 0x7F) * tmpdbl_xmm3
         dbl_xmm4 = dbl_xmm0
     else:
-        if dw_edx >= 0:
-            dbl_xmm0 = (2.0 ** dw_edx) * hleax
-        else:
-            dbl_xmm0 = (1.0 / (2.0 ** dw_edx)) * hleax
+        dbl_xmm0 = (2.0 ** dw_edx) * hleax
         dbl_xmm4 = dbl_xmm0
     dbl_xmm3 = (2.0 ** dw_esi) * lheax
     dbl_xmm1 = (2.0 ** dw_eax) * lleax
