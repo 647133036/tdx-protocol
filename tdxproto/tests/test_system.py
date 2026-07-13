@@ -19,12 +19,12 @@ class TestStockSystem:
             assert "code" in stocks[0]
 
     def test_quote(self):
-        with StockClient() as c:
+        with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:
             results = c.quote("000001")
             assert len(results) > 0
 
     def test_kline(self):
-        with StockClient() as c:
+        with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:
             bars = c.kline("000001", "day", 0, 5)
             assert len(bars) > 0
 

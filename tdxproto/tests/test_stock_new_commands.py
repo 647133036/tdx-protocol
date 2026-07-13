@@ -20,12 +20,13 @@ class TestBuilders(unittest.TestCase):
     """Verify builder packet formats."""
 
     def _parse_frame(self, pkt):
-        """Extract cmd and payload from a Frame-wrapped packet."""
-        # Frame header: 12 bytes (prefix + msg_id + ctrl + datalen*2 + cmd)
-        # But our struct pack produces 22 bytes total, with 10 bytes of payload embedded
-        cmd = struct.unpack_from("<H", pkt, 10)[0]
+        """Extract cmd and payload from a old-format packet.
+        Format: H(2) I(4) H(2 zip_len) H(2 unzip_len) I(4) I(4 cmd) H(2) H(2) payload
+        Total header: 22 bytes
+        """
+        cmd = struct.unpack_from("<I", pkt, 10)[0]
         datalen = struct.unpack_from("<H", pkt, 6)[0]
-        payload = pkt[12:]
+        payload = pkt[22:]
         return cmd, datalen, payload
 
     def test_vol_profile(self):
@@ -51,9 +52,10 @@ class TestBuilders(unittest.TestCase):
         cmd, dl, payload = self._parse_frame(pkt)
         self.assertEqual(cmd, 0x053E)
         self.assertEqual(dl, 11)
-        # Payload: 10B padding + <H(2) count=5 + <B6s(7) market=1, code=000001
-        count = struct.unpack("<H", payload[10:12])[0]
-        self.assertEqual(count, 5)
+        # Payload: H(msg_id=2) + H(5=2) + H(count=1=2) + B(market=1=1) + 6s(code=6)
+        self.assertEqual(struct.unpack("<H", payload[0:2])[0], 5)
+        stock_count = struct.unpack("<H", payload[2:4])[0]
+        self.assertEqual(stock_count, 1)
 
     def test_tick_chart(self):
         pkt = _b_tick_chart(1, "000001")

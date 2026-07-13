@@ -102,6 +102,8 @@ def decode_volume(vol: int) -> float:
     变长成交量解码，IEEE-754 风格。
     对齐 pytdx helper.get_volume.
     """
+    if vol == 0:
+        return 0.0
     logpoint = vol >> (8 * 3)
     hleax = (vol >> (8 * 2)) & 0xFF
     lheax = (vol >> 8) & 0xFF

@@ -109,7 +109,7 @@ def _b_list(market: int, start: int = 0) -> bytes:
 def _b_snapshot(market: int, code: str) -> bytes:
     """获取单个证券实时行情."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     pkgdatalen = 19
     val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, 0x5053E, 0, 0, 1)
     pkg = bytearray(struct.pack("<HIHHIIHH", *val))
@@ -123,7 +123,7 @@ def _b_kline(market: int, code: str, category: int, start: int, count: int) -> b
               7=1min, 8=1min, 9=daily, 10=quarterly, 11=yearly
     """
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     values = (
         0x10C, 0x01016408, 0x1C, 0x1C, 0x052D,
         market, code, category, 1, start, count, 0, 0, 0,
@@ -133,7 +133,7 @@ def _b_kline(market: int, code: str, category: int, start: int, count: int) -> b
 def _b_today_minute(market: int, code: str) -> bytes:
     """今日分时."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     pkg = bytearray.fromhex("0c 1b 08 00 01 01 0e 00 0e 00 1d 05")
     pkg.extend(struct.pack("<H6sI", market, code, 0))
     return bytes(pkg)
@@ -141,7 +141,7 @@ def _b_today_minute(market: int, code: str) -> bytes:
 def _b_history_minute(market: int, code: str, tdate: int) -> bytes:
     """历史分时."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     if isinstance(tdate, str) or isinstance(tdate, bytes):
         tdate = int(tdate)
     pkg = bytearray.fromhex("0c 01 30 00 01 01 0d 00 0d 00 b4 0f")
@@ -151,7 +151,7 @@ def _b_history_minute(market: int, code: str, tdate: int) -> bytes:
 def _b_today_trade(market: int, code: str, start: int, count: int) -> bytes:
     """今日分笔."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     pkg = bytearray.fromhex("0c 17 08 01 01 01 0e 00 0e 00 c5 0f")
     pkg.extend(struct.pack("<H6sHH", market, code, start, count))
     return bytes(pkg)
@@ -159,7 +159,7 @@ def _b_today_trade(market: int, code: str, start: int, count: int) -> bytes:
 def _b_history_trade(market: int, code: str, start: int, count: int, tdate: int) -> bytes:
     """历史分笔."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     pkg = bytearray.fromhex("0c 01 30 01 00 01 12 00 12 00 b5 0f")
     pkg.extend(struct.pack("<IH6sHH", tdate, market, code, start, count))
     return bytes(pkg)
@@ -167,7 +167,7 @@ def _b_history_trade(market: int, code: str, start: int, count: int, tdate: int)
 def _b_xdxr(market: int, code: str) -> bytes:
     """除权除息信息."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     pkg = bytearray.fromhex("0c 1f 18 76 00 01 0b 00 0b 00 0f 00 01 00")
     pkg.extend(struct.pack("<B6s", market, code))
     return bytes(pkg)
@@ -175,7 +175,7 @@ def _b_xdxr(market: int, code: str) -> bytes:
 def _b_finance(market: int, code: str) -> bytes:
     """财务信息."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     pkg = bytearray.fromhex("0c 1f 18 76 00 01 0b 00 0b 00 10 00 01 00")
     pkg.extend(struct.pack("<B6s", market, code))
     return bytes(pkg)
@@ -183,7 +183,7 @@ def _b_finance(market: int, code: str) -> bytes:
 def _b_company_info_cat(market: int, code: str) -> bytes:
     """公司信息类别."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     pkg = bytearray.fromhex("0c 0f 10 9b 00 01 0e 00 0e 00 cf 02")
     pkg.extend(struct.pack("<H6sI", market, code, 0))
     return bytes(pkg)
@@ -191,7 +191,7 @@ def _b_company_info_cat(market: int, code: str) -> bytes:
 def _b_company_info_content(market: int, code: str, filename: str, start: int, length: int) -> bytes:
     """公司信息内容."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     if isinstance(filename, str):
         filename = filename.encode("utf-8")
     if len(filename) < 80:
@@ -235,14 +235,14 @@ def _b_quotes_encrypt(stocks: list[tuple[int, str]]) -> bytes:
     pkg = bytearray(struct.pack("<H", count))
     for market, code in stocks:
         if isinstance(code, str):
-            code = code.encode("utf-8")
+            code = code.encode("gbk")
         pkg.extend(struct.pack("<B6sHH", market, code, 22234, 2))
     return bytes(pkg)
 
 def _b_recent_minute(market: int, code: str, tdate: int) -> bytes:
     """近期分时 / 历史tick (0x0FEB)."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     date_neg = -(tdate // 10000 * 10000 + (tdate // 100) % 100 * 100 + tdate % 100)
     return struct.pack("<iB6s", date_neg, market, code)
 
@@ -253,7 +253,7 @@ def _b_limits(start: int = 0, count: int = 2000) -> bytes:
 def _b_chart_sampling_sparkline(market: int, code: str) -> bytes:
     """小走势图 (0xFD1)."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0xFD1
     payload = bytearray(struct.pack("<H6s", market, code))
     payload.extend(bytes.fromhex("0000000000000000000000000000000001001400000000010000000000"))
@@ -267,7 +267,7 @@ def _b_chart_sampling_sparkline(market: int, code: str) -> bytes:
 def _b_history_orders(market: int, code: str) -> bytes:
     """历史委托 (0xFB4)."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0xFB4
     payload = bytearray(struct.pack("<H6s", market, code))
     pkgdatalen = len(payload)
@@ -279,7 +279,7 @@ def _b_history_orders(market: int, code: str) -> bytes:
 def _b_vol_profile(market: int, code: str) -> bytes:
     """分时成交量分布 (Volume Profile)."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0x051A
     # Payload: <H 8x <H 1x6s = 2+8+2+7 = 19B
     pkgdatalen = 19
@@ -291,7 +291,7 @@ def _b_vol_profile(market: int, code: str) -> bytes:
 def _b_index_momentum(market: int, code: str) -> bytes:
     """指数动能."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0x051C
     pkgdatalen = 19
     val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, cmd, 0, 0, 1)
@@ -302,7 +302,7 @@ def _b_index_momentum(market: int, code: str) -> bytes:
 def _b_aux(market: int, code: str) -> bytes:
     """分时副图."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0x051B
     pkgdatalen = 19
     val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, cmd, 0, 0, 1)
@@ -313,7 +313,7 @@ def _b_aux(market: int, code: str) -> bytes:
 def _b_index_info(market: int, code: str) -> bytes:
     """指数成分股/行情."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0x051D
     # Payload: <H 8x <H 1x6s I = 2+8+2+7+4 = 23B
     pkgdatalen = 23
@@ -329,7 +329,7 @@ def _b_quotes_detail(stock_list: list) -> bytes:
     payload = bytearray(struct.pack("<HH", 5, count))
     for market, code in stock_list:
         if isinstance(code, str):
-            code = code.encode("utf-8")
+            code = code.encode("gbk")
         payload.extend(struct.pack("<B6s", market, code))
     pkgdatalen = len(payload)
     val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, 0x053E, 0, 0, 0)
@@ -340,7 +340,7 @@ def _b_quotes_detail(stock_list: list) -> bytes:
 def _b_tick_chart(market: int, code: str, start: int = 0, count: int = 0xBA00) -> bytes:
     """分时明细."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0x0537
     # Payload: <H 6s H H = 2+6+2+2 = 12B
     pkgdatalen = 12
@@ -353,7 +353,7 @@ def _b_tick_chart(market: int, code: str, start: int = 0, count: int = 0xBA00) -
 def _b_auction(market: int, code: str, start: int = 0, count: int = 500, mode: int = 3) -> bytes:
     """集合竞价."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0x056A
     pkgdatalen = 28
     val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, cmd, market, 0, 0)
@@ -398,7 +398,7 @@ def _b_unusual(market: int, start: int = 0, count: int = 600) -> bytes:
 def _b_chart_sampling_kline(market: int, code: str) -> bytes:
     """K线采样."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0xFD1
     # Payload: <H 22s H H 9x = 2+22+2+2+9 = 37B
     payload = struct.pack("<H22sHH9x", market, code, 1, 20)
@@ -411,7 +411,7 @@ def _b_chart_sampling_kline(market: int, code: str) -> bytes:
 def _b_history_orders_full(market: int, code: str, tdate: int) -> bytes:
     """历史委托."""
     if isinstance(code, str):
-        code = code.encode("utf-8")
+        code = code.encode("gbk")
     cmd = 0x0FB4
     # Payload: <I B 6s = 4+1+6 = 11B
     pkgdatalen = 11
@@ -546,6 +546,8 @@ def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 
     
     使用差分编码: pre_diff_base = open_updated + close_diff_raw
     """
+    if len(data) < 4:
+        return []
     (ret_count,) = struct.unpack("<H", data[0:2])
     pos = 2
     klines = []

@@ -67,7 +67,7 @@ class TestGetPrice:
 
 class TestDecodeVolume:
     def test_zero(self):
-        assert decode_volume(0) >= 0.0
+        assert decode_volume(0) == 0.0
 
     def test_returns_float(self):
         result = decode_volume(0x12345678)

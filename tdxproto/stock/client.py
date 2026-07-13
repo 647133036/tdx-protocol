@@ -55,7 +55,8 @@ class StockClient:
     """7709 股票行情客户端，对齐 pytdx TdxHq_API."""
 
     def __init__(self, hosts: Optional[list] = None, timeout: float = 5.0,
-                 use_ip_health: bool = True, rate_limit: float = DEFAULT_RATE_LIMIT):
+                 use_ip_health: bool = True, rate_limit: float = DEFAULT_RATE_LIMIT,
+                 quote_host: Optional[str] = "60.12.136.250:7709"):
         if hosts:
             self.hosts = hosts
         elif use_ip_health:
@@ -81,6 +82,9 @@ class StockClient:
         self._last_request_time: float = 0.0
         self._stop_heartbeat = threading.Event()
         self._heartbeat_thread: Optional[threading.Thread] = None
+        self._quote_host = quote_host
+        self._quote_sock: Optional[socket.socket] = None
+        self._quote_lock = threading.Lock()
 
     def __enter__(self):
         self.connect()
@@ -204,6 +208,13 @@ class StockClient:
                 pass
             self.sock.close()
             self.sock = None
+        if self._quote_sock:
+            try:
+                self._quote_sock.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+            self._quote_sock.close()
+            self._quote_sock = None
 
     def _throttle(self):
         """请求速率限制 — 防止连续请求导致服务器断连."""
@@ -235,10 +246,55 @@ class StockClient:
                         pass
                 raise ConnectionError(f"connection lost after reconnect attempt: {e}") from e
 
+    def _quote_connect(self):
+        """连接到专用快照行情服务器."""
+        if not self._quote_host:
+            return
+        host, port = self._quote_host.rsplit(":", 1)
+        port = int(port)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect((host, port))
+        sock.send(setup_cmd1())
+        self._recv_pass(sock)
+        sock.send(setup_cmd2())
+        self._recv_pass(sock)
+        sock.send(setup_cmd3())
+        self._recv_pass(sock)
+        self._quote_sock = sock
+
+    def _quote_send_recv(self, pkg: bytes) -> bytes:
+        """通过专用快照行情连接发送请求并接收响应。未配置 quote_host 时回退到主连接。"""
+        if not self._quote_host:
+            return self._send_recv(pkg)
+        with self._quote_lock:
+            if not self._quote_sock:
+                self._quote_connect()
+            self._throttle()
+            try:
+                self._quote_sock.send(pkg)
+                return self._recv_response(self._quote_sock)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, TimeoutError) as e:
+                self._quote_sock = None
+                try:
+                    self._quote_connect()
+                    self._quote_sock.send(pkg)
+                    return self._recv_response(self._quote_sock)
+                except Exception:
+                    self._quote_sock = None
+                    raise ConnectionError(f"quote connection lost after reconnect: {e}") from e
+
     def _safe_send_recv(self, pkg: bytes) -> bytes:
         """安全发送接收，捕获 remote closed 等异常，返回空响应."""
         try:
             return self._send_recv(pkg)
+        except (ConnectionError, TimeoutError, OSError, zlib.error):
+            return b"\x00\x00"
+
+    def _quote_safe_send_recv(self, pkg: bytes) -> bytes:
+        """快照安全发送接收."""
+        try:
+            return self._quote_send_recv(pkg)
         except (ConnectionError, TimeoutError, OSError, zlib.error):
             return b"\x00\x00"
 
@@ -291,7 +347,7 @@ class StockClient:
         """获取实时行情（含名称）."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
-        data = self._send_recv(_b_snapshot(mid, num))
+        data = self._quote_send_recv(_b_snapshot(mid, num))
         result = _p_snapshot(data, coefficient=coeff)
         quote_data = result[0] if result else {}
         if quote_data and "name" not in quote_data:
@@ -466,8 +522,11 @@ class StockClient:
     def finance(self, code: str) -> dict:
         """财务信息."""
         mid, _, num = split_code(code)
-        data = self._send_recv(_b_finance(mid, num))
-        return _p_finance(data)
+        try:
+            data = self._send_recv(_b_finance(mid, num))
+            return _p_finance(data)
+        except (struct.error, IndexError):
+            return {"market": mid, "code": code, "error": "no finance data"}
 
     def company_info_cat(self, code: str) :
         """公司信息类别."""
@@ -524,7 +583,7 @@ class StockClient:
         for code in code_list:
             mid, _, num = split_code(code)
             stocks.append((mid, num))
-        data = self._send_recv(_b_quotes_detail(stocks))
+        data = self._quote_send_recv(_b_quotes_detail(stocks))
         coeff = self._get_coefficient(stocks[0][0], stocks[0][1]) if stocks else 0.01
         return _p_quotes_detail(data, coefficient=coeff)
 
@@ -532,30 +591,30 @@ class StockClient:
         """分时明细."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
-        data = self._send_recv(_b_tick_chart(mid, num, start, count))
+        data = self._quote_send_recv(_b_tick_chart(mid, num, start, count))
         return _p_tick_chart(data, coefficient=coeff)
 
     def auction(self, code: str, mode: int = 3):
         """集合竞价."""
         mid, _, num = split_code(code)
-        data = self._safe_send_recv(_b_auction(mid, num, mode=mode))
+        data = self._quote_safe_send_recv(_b_auction(mid, num, mode=mode))
         return _p_auction(data)
 
     def top_board(self, category: int = 0):
         """涨跌停板. category: 0=涨停, 1=跌停, 2=振幅, 3=涨速, 4=跌速, 5=量比, 6=正委比, 7=负委比, 8=换手."""
-        data = self._safe_send_recv(_b_top_board(category))
+        data = self._quote_safe_send_recv(_b_top_board(category))
         return _p_top_board(data)
 
     def quotes_list(self, category: int, start: int = 0, count: int = 80,
                     sort_type: int = 0, reverse: bool = False,
                     filter_raw: int = 0) -> dict:
         """板块行情列表."""
-        data = self._safe_send_recv(_b_quotes_list(category, start, count, sort_type, reverse, filter_raw))
+        data = self._quote_safe_send_recv(_b_quotes_list(category, start, count, sort_type, reverse, filter_raw))
         return _p_quotes_list(data)
 
     def unusual(self, market: int = 0, start: int = 0, count: int = 600):
         """主力监控."""
-        data = self._safe_send_recv(_b_unusual(market, start, count))
+        data = self._quote_safe_send_recv(_b_unusual(market, start, count))
         return _p_unusual(data)
 
     def chart_sampling(self, code: str):
@@ -578,7 +637,7 @@ class StockClient:
         for code in codes:
             mid, _, num = split_code(code)
             stocks.append((mid, num))
-        data = self._send_recv(_b_quotes_encrypt(stocks))
+        data = self._quote_send_recv(_b_quotes_encrypt(stocks))
         return _p_quotes_encrypt(data)
 
     def recent_minute(self, code: str, tdate=None) -> list[dict]:
@@ -594,7 +653,7 @@ class StockClient:
 
     def limits(self, start: int = 0, count: int = 2000) -> list[dict]:
         """涨跌停限制 (0x0452)."""
-        data = self._send_recv(_b_limits(start, count))
+        data = self._quote_send_recv(_b_limits(start, count))
         return _p_limits(data)
 
     def sparkline(self, code: str) -> list[float]:
@@ -619,7 +678,7 @@ class StockClient:
     def _calc_coefficient(market: int, code: str) -> float:
         code_head = code[:2]
         if market == 0:  # SZ
-            if code_head in ["00", "30", "60", "68"]: return 0.01
+            if code_head in ["00", "30"]: return 0.01
             if code_head in ["20"]: return 0.01
             if code_head in ["39"]: return 0.01
             if code_head in ["15", "16"]: return 0.001
@@ -628,7 +687,7 @@ class StockClient:
             if code_head in ["60", "68"]: return 0.01
             if code_head in ["90"]: return 0.001
             if code_head in ["00", "88", "99"]: return 0.01
-            if code_head in ["50", "51", "58"]: return 0.001
+            if code_head in ["50", "51", "52", "53", "56", "57", "58", "59"]: return 0.001
             if code_head in ["01", "10", "11", "12", "13", "14", "20"]: return 0.0001
         return 0.01
 
