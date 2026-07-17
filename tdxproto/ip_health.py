@@ -12,6 +12,7 @@ import json
 import os
 import socket
 import struct
+import threading
 import time
 import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -108,15 +109,14 @@ class HostEntry:
                 self.status = HEALTH_DEGRADED
 
     def to_dict(self) -> dict:
-        """序列化为字典(排除_transient字段)。"""
-        d = asdict(self)
-        d.pop("_total_latency_sum", None)
-        return d
+        """序列化为字典。"""
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "HostEntry":
-        """从字典反序列化。"""
-        d["_total_latency_sum"] = d.get("avg_handshake_ms", 0) * max(d.get("total_checks", 1), 1)
+        """从字典反序列化（兼容旧缓存不含 _total_latency_sum）。"""
+        if "_total_latency_sum" not in d:
+            d["_total_latency_sum"] = d.get("avg_handshake_ms", 0) * max(d.get("total_checks", 1), 1)
         return cls(**d)
 
     def __lt__(self, other: "HostEntry") -> bool:
@@ -346,12 +346,15 @@ class HostManager:
 
 # 全局单例
 _manager: Optional[HostManager] = None
+_manager_lock = threading.Lock()
 
 def get_manager(cache_path: str = DEFAULT_IP_CACHE_PATH) -> HostManager:
     """获取全局HostManager单例。"""
     global _manager
     if _manager is None:
-        _manager = HostManager(cache_path)
+        with _manager_lock:
+            if _manager is None:
+                _manager = HostManager(cache_path)
     return _manager
 
 def reset_manager():

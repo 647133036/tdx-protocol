@@ -15,6 +15,14 @@ from typing import Optional, Sequence
 from ..codec import split_code, decode_volume, get_price, u32, int_date, normalize_code
 from ..models import EquityChange, Kline, Minute, Trade
 from ..ip_health import get_manager, HostManager
+from .._reconnect import RETRY_DELAYS, select_best_host, find_working_host
+from ..scanner import scan_stock
+from ..hosts import STOCK_HOSTS_LARGE
+try:
+    from ..mac.client import MacClient
+    _HAS_MAC = True
+except ImportError:
+    _HAS_MAC = False
 from .commands import (
     setup_cmd1, setup_cmd2, setup_cmd3,
     _b_count, _b_list, _b_snapshot, _b_kline, _b_today_minute,
@@ -56,7 +64,9 @@ class StockClient:
 
     def __init__(self, hosts: Optional[list] = None, timeout: float = 5.0,
                  use_ip_health: bool = True, rate_limit: float = DEFAULT_RATE_LIMIT,
-                 quote_host: Optional[str] = "60.12.136.250:7709"):
+                 quote_host: Optional[str] = "60.12.136.250:7709",
+                 auto_reconnect: bool = True):
+        self.auto_reconnect = auto_reconnect
         if hosts:
             self.hosts = hosts
         elif use_ip_health:
@@ -65,15 +75,18 @@ class StockClient:
             if best:
                 self.hosts = [best.host]
             else:
-                self.hosts = STOCK_HOSTS
+                self.hosts = STOCK_HOSTS_LARGE
         else:
-            self.hosts = STOCK_HOSTS
+            self.hosts = STOCK_HOSTS_LARGE
+        self._hosts_flat = self.hosts  # 完整候选列表（用于 failover）
+        self._all_hosts = STOCK_HOSTS_LARGE  # 全部已知主机（用于空数据 failover 测速）
         self.timeout = timeout
         self.sock: Optional[socket.socket] = None
         self._lock = threading.Lock()
         self._coefficients = {}
         self._name_map: dict[str, str] = {}
         self._name_map_loaded: set[int] = set()
+        self._name_map_offset: dict[int, int] = {}
         self._use_ip_health = use_ip_health
         self._current_host_entry = None
         self._current_host = None
@@ -227,7 +240,7 @@ class StockClient:
         self._last_request_time = time.monotonic()
 
     def _send_recv(self, pkg: bytes) -> bytes:
-        """发送请求包并接收响应（带锁 + 速率限制 + 自动重连）."""
+        """发送请求包并接收响应（带锁 + 速率限制 + 指数退避重连 + 跨主机故障转移）。"""
         with self._lock:
             if not self.sock:
                 raise ConnectionError("not connected")
@@ -237,14 +250,45 @@ class StockClient:
                 return self._recv_response(self.sock)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
                 self.sock = None
-                if self._current_host and self._current_port:
+                last_err = e
+                # 第一阶段：同主机指数退避重试
+                for delay in RETRY_DELAYS:
+                    time.sleep(delay)
                     try:
                         self._connect_once(f"{self._current_host}:{self._current_port}")
                         self.sock.send(pkg)
                         return self._recv_response(self.sock)
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e2:
+                        self.sock = None
+                        last_err = e2
+                        continue
+                # 第二阶段：跨主机故障转移
+                new_host = select_best_host(
+                    self._hosts_flat,
+                    self._ping_and_rank,
+                    self._save_host,
+                    7709,
+                    3.0,
+                    f"{self._current_host}:{self._current_port}",
+                )
+                if new_host is not None:
+                    try:
+                        self._connect_once(new_host)
+                        self.sock.send(pkg)
+                        return self._recv_response(self.sock)
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e2:
+                        self.sock = None
+                        last_err = e2
+                # 第三阶段：NOP 重连 — 服务器可能拒绝了该命令，
+                # 不再重发原包，静默重连以保证后续命令仍可用
+                for host_str in self._hosts_flat:
+                    try:
+                        self._connect_once(host_str)
+                        break
                     except Exception:
-                        pass
-                raise ConnectionError(f"connection lost after reconnect attempt: {e}") from e
+                        self.sock = None
+                        continue
+                raise ConnectionError(f"connection lost after retry+failover: {last_err}") from e
 
     def _quote_connect(self):
         """连接到专用快照行情服务器."""
@@ -282,6 +326,11 @@ class StockClient:
                     return self._recv_response(self._quote_sock)
                 except Exception:
                     self._quote_sock = None
+                    # NOP 重连 quote 连接，不重发原包
+                    try:
+                        self._quote_connect()
+                    except Exception:
+                        pass
                     raise ConnectionError(f"quote connection lost after reconnect: {e}") from e
 
     def _safe_send_recv(self, pkg: bytes) -> bytes:
@@ -311,37 +360,45 @@ class StockClient:
         return _p_list(data)[:limit]
 
     def _load_names(self, market: int):
-        """延迟加载指定市场的代码-名称映射."""
+        """延迟加载指定市场的代码-名称映射（渐进式，从真实股票段开始）。"""
         if market in self._name_map_loaded:
             return
         self._name_map_loaded.add(market)
-        try:
-            codes = self.codes_all(market)
-            for item in codes:
-                code = item.get("code", "")
-                name = item.get("name", "")
-                if code and name:
-                    self._name_map[normalize_code(code)] = name
-        except Exception:
-            pass
+        # 股票代码表结构：
+        #   SZ (0): 分类/指数/股票混排，从 0 开始即可
+        #   SH (1): 0~24999=指数/债券/基金, 25000+=真实A股(600xxx/601xxx/603xxx/688xxx)
+        market_start = {0: 0, 1: 25000}
+        self._name_map_offset[market] = market_start.get(market, 0)
 
     def _get_name(self, code: str) -> str:
-        """获取股票名称 (从缓存或延迟加载)."""
+        """获取股票名称（渐进式加载，找到即停，最多探查 10 页）。"""
         key = normalize_code(code)
         if key in self._name_map:
             return self._name_map[key]
         mid, _, _ = split_code(code)
-        try:
-            data = self._send_recv(_b_list(mid, 0))
-            items = _p_list(data)
-            for item in items:
+        if mid not in self._name_map_loaded:
+            self._load_names(mid)
+        for _ in range(20):
+            start = self._name_map_offset.get(mid, 0)
+            try:
+                data = self._send_recv(_b_list(mid, start))
+                batch = _p_list(data)
+            except Exception:
+                break
+            if not batch:
+                self._name_map_offset.pop(mid, None)
+                break
+            for item in batch:
                 c = item.get("code", "")
                 n = item.get("name", "")
                 if c and n:
-                    self._name_map[normalize_code(c)] = n
-            return self._name_map.get(key, "")
-        except Exception:
-            return ""
+                    self._name_map[f"{'sh' if mid == 1 else 'sz'}{c}"] = n
+            self._name_map_offset[mid] = start + len(batch)
+            if key in self._name_map:
+                break
+            if len(batch) < 1000:
+                break
+        return self._name_map.get(key, "")
 
     def quote(self, code: str):
         """获取实时行情（含名称）."""
@@ -356,12 +413,16 @@ class StockClient:
 
     def kline(self, code: str, period: str = "day", start: int = 0, count: int = 800,
               adjust: str = "", anchor: str = "") -> list[Kline]:
-        """获取K线数据."""
+        """获取K线数据。空数据时自动故障转移到其他主机。"""
         mid, _, num = split_code(code)
         cat = KLINE_CAT.get(period, 9)
         coeff = self._get_coefficient(mid, num)
         data = self._send_recv(_b_kline(mid, num, cat, start, count))
         rows = _p_kline(data, cat, code, coefficient=coeff)
+        if start == 0 and self.auto_reconnect:
+            # 触发故障转移：无数据，或返回条数远少于请求条数（云镜像截断为 3 条）
+            if not rows or (count > 10 and len(rows) < count * 0.3):
+                rows = self._find_host_returning_kline(code, period, start, count)
         result = []
         for r in rows:
             y = r.get('year', 0)
@@ -389,6 +450,41 @@ class StockClient:
                 settlement=r.get('settlement', 0.0),
             ))
         return result
+
+    def _find_host_returning_kline(self, code: str, period: str,
+                                     start: int = 0, count: int = 800) -> list:
+        """K 线空/截断数据故障转移。"""
+        mid, _, num = split_code(code)
+        cat = KLINE_CAT.get(period, 9)
+        coeff = self._get_coefficient(mid, num)
+        bad_host = f"{self._current_host}:{self._current_port}"
+        ranked = self._ping_and_rank(self._all_hosts)
+
+        def _try(host: str) -> bool:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(self.timeout)
+                h, p = host.rsplit(":", 1)
+                s.connect((h, int(p)))
+                s.send(setup_cmd1()); self._recv_pass(s)
+                s.send(setup_cmd2()); self._recv_pass(s)
+                s.send(setup_cmd3()); self._recv_pass(s)
+                pkg = _b_kline(mid, num, cat, start, 3)
+                s.send(pkg)
+                data = self._recv_response(s)
+                s.close()
+                rows = _p_kline(data, cat, code, coefficient=coeff)
+                return len(rows) > 0
+            except Exception:
+                return False
+
+        new_host = find_working_host(ranked, _try, self._save_host, bad_host)
+        if new_host is None:
+            self._connect_once(bad_host)
+            return []
+        self._connect_once(new_host)
+        data = self._send_recv(_b_kline(mid, num, cat, start, count))
+        return _p_kline(data, cat, code, coefficient=coeff)
 
     def kline_all(self, code: str, period: str = "day", adjust: str = "") -> list[Kline]:
         """自动翻页拉取全量K线."""
@@ -447,11 +543,11 @@ class StockClient:
             batch = _p_list(data)
             if not batch:
                 empty_pages += 1
-                start += 100
+                start += 1000
                 continue
             all_codes.extend(batch)
             start += len(batch)
-            if len(batch) < 100:
+            if len(batch) < 1000:
                 break
             empty_pages = 0
         return all_codes
@@ -465,21 +561,67 @@ class StockClient:
         return self.xdxr(code)
 
     def today_minute(self, code: str) -> list[Minute]:
-        """今日分时."""
+        """今日分时。空数据时自动故障转移到其他主机。"""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
         data = self._send_recv(_b_today_minute(mid, num))
         rows = _p_today_minute(data, coefficient=coeff)
+        if not rows and self.auto_reconnect:
+            rows = self._find_host_returning_minute(code, tdate=None)
         return [Minute(time=str(r.get('minute', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), avg_price=r.get('avg_price', 0.0)) for r in rows]
 
     def history_minute(self, code: str, tdate) -> list[Minute]:
-        """历史分时."""
+        """历史分时。空数据时自动故障转移到其他主机。"""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
         d = self._parse_tdate(tdate)
         data = self._send_recv(_b_history_minute(mid, num, d))
         rows = _p_history_minute(data, coefficient=coeff)
+        if not rows and self.auto_reconnect:
+            rows = self._find_host_returning_minute(code, tdate)
         return [Minute(time=str(r.get('minute', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), avg_price=r.get('avg_price', 0.0)) for r in rows]
+
+    def _find_host_returning_minute(self, code: str, tdate) -> list:
+        """分时数据空数据故障转移。"""
+        mid, _, num = split_code(code)
+        coeff = self._get_coefficient(mid, num)
+        is_history = tdate is not None
+        d = self._parse_tdate(tdate) if is_history else int(date.today().strftime("%Y%m%d"))
+        bad_host = f"{self._current_host}:{self._current_port}"
+        ranked = self._ping_and_rank(self._all_hosts)
+
+        def _try(host: str) -> bool:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(self.timeout)
+                h, p = host.rsplit(":", 1)
+                s.connect((h, int(p)))
+                s.send(setup_cmd1()); self._recv_pass(s)
+                s.send(setup_cmd2()); self._recv_pass(s)
+                s.send(setup_cmd3()); self._recv_pass(s)
+                pkg = _b_history_minute(mid, num, d) if is_history else _b_today_minute(mid, num)
+                s.send(pkg)
+                data = self._recv_response(s)
+                s.close()
+                rows = _p_history_minute(data, coefficient=coeff) if is_history else _p_today_minute(data, coefficient=coeff)
+                return len(rows) > 0
+            except Exception:
+                return False
+
+        new_host = find_working_host(ranked, _try, self._save_host, bad_host)
+        if new_host is None:
+            self._connect_once(bad_host)
+            return []
+        self._connect_once(new_host)
+        if is_history:
+            pkg = _b_history_minute(mid, num, d)
+            data = self._send_recv(pkg)
+            rows = _p_history_minute(data, coefficient=coeff)
+        else:
+            pkg = _b_today_minute(mid, num)
+            data = self._send_recv(pkg)
+            rows = _p_today_minute(data, coefficient=coeff)
+        return rows
 
     def today_trade(self, code: str, start: int = 0, count: int = 115) -> list[Trade]:
         """今日分笔."""
@@ -588,10 +730,10 @@ class StockClient:
         return _p_quotes_detail(data, coefficient=coeff)
 
     def tick_chart(self, code: str, start: int = 0, count: int = 0xBA00):
-        """分时明细."""
+        """分时明细 — 对齐 pytdx GetTransactionData (CMD 0x0FC5)."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
-        data = self._quote_send_recv(_b_tick_chart(mid, num, start, count))
+        data = self._send_recv(_b_tick_chart(mid, num, start, count))
         return _p_tick_chart(data, coefficient=coeff)
 
     def auction(self, code: str, mode: int = 3):
@@ -657,16 +799,238 @@ class StockClient:
         return _p_limits(data)
 
     def sparkline(self, code: str) -> list[float]:
-        """小走势图 (0xFD1)."""
-        mid, _, num = split_code(code)
-        data = self._send_recv(_b_chart_sampling_sparkline(mid, num))
-        return _p_chart_sampling_sparkline(data)
+        """小走势图 — 用 1min K 线收盘价序列替代 (CMD 0xFD1 不可用)."""
+        bars = self.kline(code, '1m', 0, 240)
+        return [b.close for b in bars]
 
     def aux(self, code: str) -> list[dict]:
         """分时副图 (0x051B)."""
         mid, _, num = split_code(code)
         data = self._send_recv(_b_aux(mid, num))
         return _p_aux(data)
+
+    # ============================================================
+    # 板块相关方法（通过 block_info + parse_block_dat）
+    # ============================================================
+
+    def get_block_file_parsed(self, block_file: str) -> list[dict]:
+        """获取并解析板块 .dat 文件内容（一行式调用）.
+
+        常用文件名:
+          block_zs.dat — 行业/指数板块
+          block_gn.dat — 概念板块
+          block_fg.dat — 风格板块
+        """
+        from ..block_reader import parse_block_dat
+        meta = self.block_info_meta(block_file)
+        size = meta.get("size", 0)
+        if not size:
+            return []
+        chunk_size = 0x7530  # 30000 字节/片
+        full_data = bytearray()
+        offset = 0
+        while offset < size:
+            piece = self.block_info(block_file, offset, min(chunk_size, size - offset))
+            full_data.extend(piece)
+            offset += chunk_size
+        return parse_block_dat(bytes(full_data), block_file)
+
+    def board_list(
+        self,
+        page_size: int = 150,
+        board_type: int = 0,
+        sort_column: int = 0,
+        sort_order: int = 1,
+        start: int = 0,
+    ) -> list[dict]:
+        """获取板块列表（通过 MAC 协议）.
+
+        board_type: 0=行业一级, 3=概念, 4=风格, 5=地区, 255=全部
+        sort_column: 0=涨速, 1=涨跌幅, 2=成交额, 3=成交量
+        sort_order: 0=升序, 1=降序
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.board_list(page_size, board_type, sort_column, sort_order, start)
+        finally:
+            mac.close()
+
+    def board_members(
+        self,
+        board_code: str | int,
+        page_size: int = 80,
+        start: int = 0,
+        sort_type: int = 0,
+        sort_order: int = 1,
+    ) -> list[dict]:
+        """获取板块成分股（通过 MAC 协议）.
+
+        示例: board_members("881001") — 获取申万一级行业板块成分股
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.board_members(board_code, page_size, start, sort_type, sort_order)
+        finally:
+            mac.close()
+
+    def stock_blocks(self, market: int, code: str) -> list[dict]:
+        """获取个股所属板块（通过 MAC 协议）.
+
+        示例: stock_blocks(0, "sz000001") — 平安银行所属板块
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.stock_blocks(market, code)
+        finally:
+            mac.close()
+
+    def board_summary(self, board_code: str | int) -> dict:
+        """获取板块汇总（成交额/主力净流入/涨跌家数）.
+
+        示例: board_summary("881001")
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.board_summary(board_code)
+        finally:
+            mac.close()
+
+    def board_change_ranking(
+        self,
+        board_type: int = 0,
+        days: int = 5,
+        top_n: int = 100,
+        sort_order: int = 1,
+    ) -> list[dict]:
+        """获取板块 N 日涨跌幅排行（通过 MAC 协议）.
+
+        board_type: 0=行业一级, 3=概念, 4=风格, 5=地区
+        days: N 日周期（如 5=5日排行）
+        top_n: 取前 N 名
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.board_change_ranking(board_type, days, top_n, sort_order)
+        finally:
+            mac.close()
+
+    def quote_list(
+        self,
+        category: int,
+        count: int = 80,
+        start: int = 0,
+        sort_type: int = 0,
+        sort_order: int = 1,
+        exclude_flags: int = 0,
+    ) -> list[dict]:
+        """市场分类批量报价（quote-list）.
+
+        category: Category 枚举值（Category.A=全部A股, Category.KCB=科创板, Category.CYB=创业板）
+        exclude_flags: FilterType 组合（如 FilterType.ST | FilterType.NEW）
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        from ..mac.commands import Category as _Cat
+        cat_val = _Cat.A if isinstance(category, str) else category
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.category_quotes(cat_val, count, start, sort_type, sort_order, exclude_flags)
+        finally:
+            mac.close()
+
+    def capital_flow(self, code: str) -> dict:
+        """个股资金流向（capital-flow）.
+
+        示例: client.capital_flow("sz600519") — 贵州茅台资金流向
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mid, _, num = split_code(code)
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.capital_flow(mid, num)
+        finally:
+            mac.close()
+
+    def market_stat(self) -> dict:
+        """市场统计（market-stat）.
+
+        通过标准协议查询特殊指数 880005/880001/880006 计算涨跌家数、总市值等.
+        """
+        from datetime import date as dt_date
+        today_str = dt_date.today().strftime("%Y%m%d")
+        try:
+            q1 = self.quote(f"sh{today_str}0005")   # 880005
+            q2 = self.quote(f"sh{today_str}0001")   # 880001
+            q3 = self.quote(f"sh{today_str}0006")   # 880006
+        except Exception:
+            return {}
+
+        up = round(q1.get("price", 0) * 10) if q1 else 0
+        down = round(q1.get("open", 0) * 10) if q1 else 0
+        neutral = round(q1.get("low", 0) * 10) if q1 else 0
+        total = round(q1.get("high", 0) * 10) if q1 else 0
+        limit_up = round(q3.get("price", 0) * 10) if q3 else 0
+        limit_down = round(q3.get("open", 0) * 10) if q3 else 0
+        market_cap = q2.get("amount", 0) if q2 else 0
+        total_amount = q1.get("amount", 0) if q1 else 0
+        total_volume = q1.get("volume", 0) if q1 else 0
+
+        return {
+            "up_count": up,
+            "down_count": down,
+            "neutral_count": neutral,
+            "total_count": total,
+            "suspended_count": max(0, total - up - down - neutral),
+            "limit_up": limit_up,
+            "limit_down": limit_down,
+            "total_amount": round(total_amount, 2),
+            "total_volume": total_volume,
+            "market_cap": round(market_cap, 2),
+        }
+
+    def server_info(self) -> dict:
+        """服务器信息（server-info）."""
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.server_info()
+        finally:
+            mac.close()
+
+    def symbol_info(self, code: str) -> dict:
+        """个股详细信息（symbol-info）.
+
+        示例: client.symbol_info("sz000001") — 平安银行详细信息
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mid, _, num = split_code(code)
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.symbol_info(mid, num)
+        finally:
+            mac.close()
 
     def _get_coefficient(self, market: int, code: str) -> float:
         key = (market, code)
@@ -703,3 +1067,93 @@ class StockClient:
         """心跳: 发送 get_security_count."""
         import random
         self.count(random.randint(0, 1))
+
+    # ---- 故障转移辅助 ----
+
+    @staticmethod
+    def _ping_and_rank(hosts: list[str], port: int = 7709, timeout: float = 3.0) -> list[tuple[str, float]]:
+        """并发测速，返回按延迟升序的 [(host:port, ms), ...]。"""
+        results = scan_stock(hosts, workers=32, timeout=timeout)
+        ranked = [(r.host, r.handshake_latency_ms) for r in results if r.ok]
+        ranked.sort(key=lambda x: x[1])
+        return ranked
+
+    def _save_host(self, host: str) -> None:
+        """持久化最优 host（写入 ip_health 缓存）。"""
+        try:
+            from ..ip_health import get_manager
+            m = get_manager()
+            for e in m.pool.entries.values():
+                if e.host == host and e.protocol == "7709":
+                    return
+            # 保存到缓存文件
+            m.save_cache()
+        except Exception:
+            pass
+
+    def _find_host_returning_data(self, cmd_name: str, builder, parser, code: str,
+                                    period: str = "", tdate=None) -> list:
+        """空数据故障转移：测速后逐台实测，返回首台有效数据。
+
+        Args:
+            cmd_name: 用于日志标识。
+            builder: ``(mid, num, ...) -> bytes`` 的命令构造器。
+            parser: ``(data, ...) -> list`` 的解析器。
+            code: 股票代码。
+            period: K 线周期（仅 K 线用）。
+            tdate: 日期（仅历史分时用）。
+
+        Returns:
+            非空数据列表，或空列表（全部不可用）。
+        """
+        bad_host = f"{self._current_host}:{self._current_port}"
+        mid, _, num = split_code(code)
+        coeff = self._get_coefficient(mid, num)
+        ranked = self._ping_and_rank(self._all_hosts)
+
+        def _try(host: str) -> bool:
+            """连接指定主机，执行命令，返回是否有数据。"""
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(self.timeout)
+                h, p = host.rsplit(":", 1)
+                s.connect((h, int(p)))
+                s.send(setup_cmd1())
+                self._recv_pass(s)
+                s.send(setup_cmd2())
+                self._recv_pass(s)
+                s.send(setup_cmd3())
+                self._recv_pass(s)
+                if period:
+                    pkg = builder(mid, num, KLINE_CAT.get(period, 9), 0, 3)
+                else:
+                    d = self._parse_tdate(tdate) if tdate else int(date.today().strftime("%Y%m%d"))
+                    pkg = builder(mid, num, d)
+                s.send(pkg)
+                data = self._recv_response(s)
+                s.close()
+                if period:
+                    rows = parser(data, KLINE_CAT.get(period, 9), code, coefficient=coeff)
+                else:
+                    rows = parser(data, coefficient=coeff)
+                return len(rows) > 0
+            except Exception:
+                return False
+
+        new_host = find_working_host(ranked, _try, self._save_host, bad_host)
+        if new_host is None:
+            self._connect_once(bad_host)
+            return []
+        # 切换到新 host
+        self._connect_once(new_host)
+        if period:
+            pkg = builder(mid, num, KLINE_CAT.get(period, 9), 0, 3)
+        else:
+            d = self._parse_tdate(tdate) if tdate else int(date.today().strftime("%Y%m%d"))
+            pkg = builder(mid, num, d)
+        data = self._send_recv(pkg)
+        if period:
+            rows = parser(data, KLINE_CAT.get(period, 9), code, coefficient=coeff)
+        else:
+            rows = parser(data, coefficient=coeff)
+        return rows

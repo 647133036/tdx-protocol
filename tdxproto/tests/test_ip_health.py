@@ -77,7 +77,7 @@ class TestHostEntry:
             _total_latency_sum=225.0,
         )
         d = entry.to_dict()
-        assert "_total_latency_sum" not in d
+        assert d["_total_latency_sum"] == 225.0
         assert d["host"] == "1.2.3.4:7709"
         
         restored = HostEntry.from_dict(d)

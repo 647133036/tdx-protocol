@@ -3,6 +3,7 @@
 import struct
 import unittest
 from datetime import date, time
+from unittest.mock import patch, MagicMock
 
 from tdxproto.stock.commands import (
     _b_vol_profile, _b_index_momentum, _b_index_info,
@@ -14,6 +15,7 @@ from tdxproto.stock.commands import (
     _p_top_board, _p_quotes_list, _p_unusual,
     _p_chart_sampling_kline, _p_history_orders,
 )
+from tdxproto.stock.client import StockClient
 
 
 class TestBuilders(unittest.TestCase):
@@ -58,10 +60,15 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(stock_count, 1)
 
     def test_tick_chart(self):
+        """Verify pytdx GetTransactionData format (CMD 0x0FC5)."""
         pkt = _b_tick_chart(1, "000001")
-        cmd, dl, _ = self._parse_frame(pkt)
-        self.assertEqual(cmd, 0x0537)
-        self.assertEqual(dl, 12)
+        # Header: 0c 17 08 01 01 01 0e 00 0e 00 c5 0f (12 bytes)
+        self.assertEqual(pkt[:12], bytes.fromhex("0c 17 08 01 01 01 0e 00 0e 00 c5 0f"))
+        # Payload: <H6sHH = market + code + start + count = 2+6+2+2 = 12 bytes
+        self.assertEqual(len(pkt), 24)
+        market, code, start, count = struct.unpack_from("<H6sHH", pkt, 12)
+        self.assertEqual(market, 1)
+        self.assertEqual(code.decode("gbk").strip("\x00"), "000001")
 
     def test_auction(self):
         pkt = _b_auction(1, "000001")
@@ -185,3 +192,70 @@ class TestParsers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestQuoteHostRouting(unittest.TestCase):
+    """验证 quote_host 分离路由逻辑."""
+
+    def _make_snapshot_response(self):
+        """构造最小合法快照响应 (跳过b1cb后: num=1, market=0, code=000001, active=0)."""
+        data = struct.pack("<HH", 0, 1)
+        data += struct.pack("<B6sH", 0, b"000001", 0)
+        data += b"\x00" * 200
+        return data
+
+    def test_quote_method_uses_quote_connection(self):
+        """quote() 方法应使用 _quote_send_recv 而非 _send_recv."""
+        c = StockClient(hosts=["127.0.0.1:7709"], timeout=0.5, quote_host="60.12.136.250:7709")
+        c._quote_send_recv = MagicMock(return_value=self._make_snapshot_response())
+        c._send_recv = MagicMock()
+        with patch.object(c, '_get_coefficient', return_value=0.01):
+            with patch.object(c, '_get_name', return_value="test"):
+                result = c.quote("sz000001")
+        c._quote_send_recv.assert_called_once()
+        c._send_recv.assert_not_called()
+
+    def test_kline_uses_main_connection(self):
+        """kline() 方法应使用 _send_recv 而非 _quote_send_recv."""
+        c = StockClient(hosts=["127.0.0.1:7709"], timeout=0.5, quote_host="60.12.136.250:7709",
+                        auto_reconnect=False)
+        c._send_recv = MagicMock(return_value=b"\x00\x00")
+        c._quote_send_recv = MagicMock()
+        with patch.object(c, '_get_coefficient', return_value=0.01):
+            result = c.kline("sz000001", "day", 0, 5)
+        c._send_recv.assert_called_once()
+        c._quote_send_recv.assert_not_called()
+        assert result == []
+
+    def test_today_minute_uses_main_connection(self):
+        """today_minute() 应使用主连接, 00代码需显式前缀."""
+        c = StockClient(hosts=["127.0.0.1:7709"], timeout=0.5, quote_host="60.12.136.250:7709",
+                        auto_reconnect=False)
+        valid = struct.pack("<H", 1) + b"\x00\x00\x00\x30\x30\x30\x30\x30\x31" + b"\x0a\x00\x64"
+        c._send_recv = MagicMock(return_value=valid)
+        c._quote_send_recv = MagicMock()
+        with patch.object(c, '_get_coefficient', return_value=0.01):
+            with self.assertRaises(ValueError) as ctx:
+                c.today_minute("000001")
+            self.assertIn("ambiguous", str(ctx.exception))
+        c._send_recv.assert_not_called()
+        c._quote_send_recv.assert_not_called()
+
+    def test_quotes_detail_uses_quote_connection(self):
+        """quotes_detail() 应使用 quote 连接."""
+        c = StockClient(hosts=["127.0.0.1:7709"], timeout=0.5, quote_host="60.12.136.250:7709")
+        c._quote_send_recv = MagicMock(return_value=b"\x00\x00\x00\x00")
+        c._send_recv = MagicMock()
+        with patch.object(c, '_get_coefficient', return_value=0.01):
+            result = c.quotes_detail(["sz000001"])
+        c._quote_send_recv.assert_called_once()
+        c._send_recv.assert_not_called()
+
+    def test_no_quote_host_fallback_to_main(self):
+        """quote_host=None 时 quote() 应回退到主连接."""
+        c = StockClient(hosts=["127.0.0.1:7709"], timeout=0.5, quote_host=None)
+        with patch.object(c, '_send_recv', return_value=self._make_snapshot_response()) as mock_send:
+            with patch.object(c, '_get_coefficient', return_value=0.01):
+                with patch.object(c, '_get_name', return_value="test"):
+                    result = c.quote("sz000001")
+            mock_send.assert_called_once()

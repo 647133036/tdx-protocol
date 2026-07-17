@@ -13,18 +13,28 @@ def f32(data: bytes, off: int = 0) -> float:
     return struct.unpack_from("<f", data, off)[0]
 
 def split_code(code: str) -> Tuple[int, str, str]:
-    """解析股票代码为 (market_int, exchange_str, numeric_code)."""
+    """解析股票代码为 (market_int, exchange_str, numeric_code).
+    
+    00 开头的代码在 SZ(股票) 和 SH(指数) 中均存在歧义,
+    必须显式使用 sz 或 sh 前缀, 如 sz000001 / sh000001.
+    """
     code = code.strip().lower()
     if code.startswith(("sz", "sh", "bj")):
         exchange = code[:2]
         num = code[2:]
     else:
         num = code[:6]
+        if num.startswith(("00",)):
+            raise ValueError(
+                f"ambiguous code '{code}': 00-prefix codes exist in both "
+                f"SZ (stocks) and SH (indices). "
+                f"Use 'sz{code}' or 'sh{code}' to disambiguate."
+            )
         if num.startswith(("60", "68", "69")):
             exchange = "sh"
         elif num.startswith(("8", "4")):
             exchange = "bj"
-        elif num.startswith(("00", "30", "15", "16", "39")):
+        elif num.startswith(("30", "15", "16", "39")):
             exchange = "sz"
         elif num.startswith(("5", "9")):
             exchange = "sh"

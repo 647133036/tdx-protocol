@@ -240,11 +240,12 @@ def _b_quotes_encrypt(stocks: list[tuple[int, str]]) -> bytes:
     return bytes(pkg)
 
 def _b_recent_minute(market: int, code: str, tdate: int) -> bytes:
-    """近期分时 / 历史tick (0x0FEB)."""
+    """近期分时 — 对齐 pytdx GetHistoryMinuteTimeData (CMD 0x0FB4)."""
     if isinstance(code, str):
         code = code.encode("gbk")
-    date_neg = -(tdate // 10000 * 10000 + (tdate // 100) % 100 * 100 + tdate % 100)
-    return struct.pack("<iB6s", date_neg, market, code)
+    pkg = bytearray.fromhex("0c 01 30 00 01 01 0d 00 0d 00 b4 0f")
+    pkg.extend(struct.pack("<IB6s", tdate, market, code))
+    return bytes(pkg)
 
 def _b_limits(start: int = 0, count: int = 2000) -> bytes:
     """涨跌停限制 (0x0452)."""
@@ -338,16 +339,11 @@ def _b_quotes_detail(stock_list: list) -> bytes:
     return bytes(pkg)
 
 def _b_tick_chart(market: int, code: str, start: int = 0, count: int = 0xBA00) -> bytes:
-    """分时明细."""
+    """分时明细 — 对齐 pytdx GetTransactionData (CMD 0x0FC5)."""
     if isinstance(code, str):
         code = code.encode("gbk")
-    cmd = 0x0537
-    # Payload: <H 6s H H = 2+6+2+2 = 12B
-    pkgdatalen = 12
-    val = (0x10C, 0x02006320, pkgdatalen, pkgdatalen, cmd, market, 0, 0)
-    pkg = bytearray(struct.pack("<HIHHIIHH", *val))
-    pkg.extend(code.ljust(6, b"\x00"))
-    pkg.extend(struct.pack("<HH", start, count))
+    pkg = bytearray.fromhex("0c 17 08 01 01 01 0e 00 0e 00 c5 0f")
+    pkg.extend(struct.pack("<H6sHH", market, code, start, count))
     return bytes(pkg)
 
 def _b_auction(market: int, code: str, start: int = 0, count: int = 500, mode: int = 3) -> bytes:
@@ -605,16 +601,23 @@ def _get_datetime(category, buffer, pos):
     return year, month, day, hour, minute, pos
 
 def _p_today_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
-    """对齐 pytdx GetMinuteTimeData.parseResponse."""
-    pos = 0
+    """对齐 pytdx GetMinuteTimeData.parseResponse.
+    
+    响应格式: 固定头(11B) + 变长额外头 + 数据区(num条×3个varint).
+    通过解析全部varint后从尾部取 num*3 个来定位数据起始.
+    """
     (num,) = struct.unpack("<H", data[:2])
+    pos = 0
+    vals = []
+    while pos < len(data):
+        v, pos = get_price(data, pos)
+        vals.append(v)
+    start = len(vals) - num * 3
     last_price = 0
-    pos += 4
     prices = []
-    for _ in range(num):
-        price_raw, pos = get_price(data, pos)
-        reversed1, pos = get_price(data, pos)
-        vol, pos = get_price(data, pos)
+    for i in range(num):
+        price_raw = vals[start + i * 3]
+        vol = vals[start + i * 3 + 2]
         last_price = last_price + price_raw
         prices.append({
             "price": last_price * coefficient,
@@ -657,7 +660,7 @@ def _p_history_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
     prices = []
     for _ in range(num):
         price_raw, pos = get_price(data, pos)
-        reversed1, pos = get_price(data, pos)
+        _, pos = get_price(data, pos)
         vol, pos = get_price(data, pos)
         last_price = last_price + price_raw
         prices.append({
@@ -1026,25 +1029,29 @@ def _p_quotes_detail(data: bytes, coefficient: float = 0.01) -> list[dict]:
     return quotes
 
 def _p_tick_chart(data: bytes, coefficient: float = 0.01) -> list[dict]:
-    """分时明细."""
-    num, _ = struct.unpack("<HH", data[:4])
-    pos = 4
+    """分时明细 — 对齐 pytdx GetTransactionData 响应格式."""
+    pos = 0
+    (num,) = struct.unpack("<H", data[:2])
+    pos += 2
     result = []
-    start_price = 0
-    start_avg = 0
+    last_price = 0
     for _ in range(num):
-        price, pos = get_price(data, pos)
-        avg, pos = get_price(data, pos)
+        (minutes,) = struct.unpack("<H", data[pos:pos+2]); pos += 2
+        hour = int(minutes / 60)
+        minute = minutes % 60
+        price_raw, pos = get_price(data, pos)
         vol, pos = get_price(data, pos)
+        num_orders, pos = get_price(data, pos)
+        buy_or_sell, pos = get_price(data, pos)
+        _, pos = get_price(data, pos)
+        last_price = last_price + price_raw
         result.append({
-            "price": (start_price + price) * coefficient,
-            "avg": (start_avg + avg) * coefficient,
+            "time": f"{hour:02d}:{minute:02d}",
+            "price": float(last_price) / 100,
             "vol": vol,
+            "num": num_orders,
+            "buyorsell": buy_or_sell,
         })
-        if start_price == 0:
-            start_price = price
-        if start_avg == 0:
-            start_avg = avg
     return result
 
 def _p_auction(data: bytes) -> list[dict]:
@@ -1271,23 +1278,19 @@ def _p_quotes_encrypt(data: bytes, coefficient: float = 0.01) -> list[dict]:
     return result
 
 def _p_recent_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
-    """近期分时 / 历史tick (0x0FEB)."""
-    count, m, n = struct.unpack("<HII", data[:10])
-    pos = 10
+    """近期分时 — 对齐 pytdx GetHistoryMinuteTimeData 响应格式."""
+    pos = 0
+    (num,) = struct.unpack("<H", data[:2])
+    last_price = 0
+    pos += 6
     result = []
-    start_price = 0
-    avg_price = 0
-    for _ in range(count):
-        price, pos = get_price(data, pos)
-        avg, pos = get_price(data, pos)
+    for _ in range(num):
+        price_raw, pos = get_price(data, pos)
+        _, pos = get_price(data, pos)
         vol, pos = get_price(data, pos)
-        if start_price == 0:
-            start_price = price
-        if avg_price == 0:
-            avg_price = avg
+        last_price = last_price + price_raw
         result.append({
-            "price": (start_price + price) * coefficient,
-            "avg": (avg_price + avg) * coefficient,
+            "price": float(last_price) * coefficient,
             "vol": vol,
         })
     return result

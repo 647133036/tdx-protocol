@@ -94,7 +94,8 @@ class TestNormalizeCode:
         assert normalize_code("sz000001") == "sz000001"
 
     def test_six_digit_auto_sz(self):
-        assert normalize_code("000001") == "sz000001"
+        with pytest.raises(ValueError, match="ambiguous"):
+            normalize_code("000002")
 
     def test_six_digit_auto_sh(self):
         assert normalize_code("600000") == "sh600000"

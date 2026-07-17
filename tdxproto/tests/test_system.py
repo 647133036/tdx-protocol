@@ -20,22 +20,22 @@ class TestStockSystem:
 
     def test_quote(self):
         with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:
-            results = c.quote("000001")
+            results = c.quote("sz000001")
             assert len(results) > 0
 
     def test_kline(self):
         with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:
-            bars = c.kline("000001", "day", 0, 5)
+            bars = c.kline("sz000001", "day", 0, 5)
             assert len(bars) > 0
 
     def test_today_minute(self):
         with StockClient() as c:
-            pts = c.today_minute("000001")
+            pts = c.today_minute("sz000001")
             assert isinstance(pts, list)
 
     def test_today_trade(self):
         with StockClient() as c:
-            ticks = c.today_trade("000001", 0, 5)
+            ticks = c.today_trade("sz000001", 0, 5)
             assert isinstance(ticks, list)
 
 
