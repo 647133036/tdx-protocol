@@ -48,6 +48,8 @@ CMD_EX_LIST = 0x23F5
 CMD_EX_COUNT = 0x23F0
 CMD_EX_CATEGORY_LIST = 0x23F4
 
+def _b_ex_count() -> bytes: return b""
+
 PREFIX = 0x01
 
 HANDSHAKE_DATA = bytes.fromhex(
@@ -242,7 +244,7 @@ def _p_ex_kline(data: bytes, mid: int, code: str, period: str) -> list[Kline]:
         bars.append(Kline(
             time=f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}",
             open=open_p, high=high, low=low, close=close,
-            volume=trade, amount=price, position=position, settlement=price,
+            volume=trade, amount=price, position=position,
         ))
     return bars
 
@@ -270,7 +272,7 @@ def _p_ex_kline_range(data: bytes, mid: int, code: str, period: str) -> list[Kli
         bars.append(Kline(
             time=f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}",
             open=open_p, high=high, low=low, close=close,
-            volume=trade, amount=settlementprice, position=position, settlement=settlementprice,
+            volume=trade, amount=settlementprice, position=position,
         ))
     return bars
 
@@ -465,6 +467,11 @@ def _p_ex_table(data: bytes) -> tuple[int, int, str]:
     count, ctx_len = struct.unpack("<II", data[161:169])
     ctx = data[169:169 + ctx_len].decode("gbk", errors="ignore").replace("\x00", "") if ctx_len > 0 else ""
     return start, count, ctx
+
+def _p_ex_count(data: bytes) -> int:
+    """解析品种数量."""
+    if len(data) < 4: return 0
+    return struct.unpack("<I", data[:4])[0]
 
 def _p_ex_quotes(data: bytes) -> list[dict]:
     """批量行情解析."""

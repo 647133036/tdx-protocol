@@ -38,6 +38,9 @@ from .hosts import (
     MAC_HOSTS,
 )
 from .block_reader import parse_block_dat
+from .gbbq import GbbqManager, get_gbbq_manager
+from .workday import WorkdayManager, get_workday_manager
+from .block_bridge import BlockBridge, get_block_bridge
 try:
     from .mac.client import MacClient
     from .mac.commands import BoardType, SortColumn, SortOrder, FieldBit, Category, FilterType
@@ -45,7 +48,7 @@ try:
 except ImportError:
     _HAS_MAC = False
 
-__version__ = "1.3.0"
+__version__ = "1.0.1"
 __all__ = [
     "StockClient", "FuturesClient", "MacClient",
     "CninfoClient", "Announcement", "CninfoError",
@@ -62,6 +65,9 @@ __all__ = [
     "FUTURES_HOSTS_FAST", "FUTURES_HOSTS_LARGE",
     "MAC_HOSTS",
     "parse_block_dat",
+    "GbbqManager", "get_gbbq_manager",
+    "WorkdayManager", "get_workday_manager",
+    "BlockBridge", "get_block_bridge",
     "BoardType", "SortColumn", "SortOrder", "FieldBit",
     "Category", "FilterType",
 ]

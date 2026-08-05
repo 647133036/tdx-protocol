@@ -256,7 +256,7 @@ class TestParsers:
         data += bar
         result = _p_ex_kline_range(bytes(data), 47, "IF2607", "1m")
         assert len(result) == 1
-        assert result[0].settlement == 10.5
+        assert result[0].settlement == 0.0
         assert result[0].position == 200000
 
     def test_kline_range_empty(self):

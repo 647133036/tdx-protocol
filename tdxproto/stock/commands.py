@@ -530,7 +530,6 @@ def _p_snapshot(data: bytes, coefficient: float = 0.01) -> list[dict]:
         stocks.append(one_stock)
     return stocks
 
-@staticmethod
 def _cal_price(base_p, diff, coefficient=0.01):
     return float(base_p + diff) * coefficient
 
@@ -625,7 +624,7 @@ def _p_today_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
         })
     return prices
 
-def _p_today_trade(data: bytes) -> list[dict]:
+def _p_today_trade(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetTransactionData.parseResponse."""
     pos = 0
     (num,) = struct.unpack("<H", data[:2])
@@ -644,7 +643,7 @@ def _p_today_trade(data: bytes) -> list[dict]:
         last_price = last_price + price_raw
         ticks.append({
             "time": f"{hour:02d}:{minute:02d}",
-            "price": float(last_price) / 100,
+            "price": float(last_price) * coefficient,
             "vol": vol,
             "num": num_orders,
             "buyorsell": buy_or_sell,
@@ -669,7 +668,7 @@ def _p_history_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
         })
     return prices
 
-def _p_history_trade(data: bytes) -> list[dict]:
+def _p_history_trade(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetHistoryTransactionData.parseResponse."""
     pos = 0
     (num,) = struct.unpack("<H", data[:2])
@@ -688,7 +687,7 @@ def _p_history_trade(data: bytes) -> list[dict]:
         last_price = last_price + price_raw
         ticks.append({
             "time": f"{hour:02d}:{minute:02d}",
-            "price": float(last_price) / 100,
+            "price": float(last_price) * coefficient,
             "vol": vol,
             "buyorsell": buy_or_sell,
         })
@@ -887,7 +886,7 @@ def _p_vol_profile(data: bytes, coefficient: float = 0.01) -> dict:
         "vol_profile": vol_profile,
     }
 
-def _p_index_momentum(data: bytes) -> list[int]:
+def _p_index_momentum(data: bytes, coefficient: float = 0.01) -> list[float]:
     """指数动能."""
     count, = struct.unpack("<H", data[:2])
     pos = 2
@@ -896,7 +895,7 @@ def _p_index_momentum(data: bytes) -> list[int]:
     for _ in range(count):
         mom, pos = get_price(data, pos)
         start_mom += mom
-        result.append(start_mom)
+        result.append(start_mom * coefficient)
     return result
 
 def _p_aux(data: bytes, coefficient: float = 0.01) -> list[dict]:
@@ -1224,11 +1223,13 @@ def _p_history_orders(data: bytes, coefficient: float = 0.01) -> list[dict]:
 
 def _p_quotes_encrypt(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """增量刷新 (0x0547). 数据经过 XOR 0x93 解密."""
+    if len(data) < 2: return []
     data = bytes(b ^ 0x93 for b in data)
     count, = struct.unpack("<H", data[:2])
     pos = 2
     result = []
     for _ in range(count):
+        if pos + 9 > len(data): break
         market, code, active = struct.unpack("<B6sH", data[pos:pos+9])
         pos += 9
         close, pos = get_price(data, pos)
@@ -1297,9 +1298,10 @@ def _p_recent_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
 
 def _p_limits(data: bytes) -> list[dict]:
     """涨跌停限制 (0x0452)."""
+    if len(data) < 2: return []
     count, = struct.unpack("<H", data[:2])
     result = []
-    for i in range(count):
+    for i in range(min(count, (len(data) - 2) // 13)):
         market, code_num, p1, p2 = struct.unpack("<BIff", data[i*13+2:i*13+15])
         result.append({
             "market": market,

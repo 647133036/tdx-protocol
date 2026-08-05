@@ -4,12 +4,14 @@
 """
 from __future__ import annotations
 
+import io
 import socket
 import struct
 import time
 import threading
+import zipfile
 import zlib
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional, Sequence
 
 from ..codec import split_code, decode_volume, get_price, u32, int_date, normalize_code
@@ -59,12 +61,30 @@ DEFAULT_RATE_LIMIT = 0.5   # 每秒最多2个请求
 HEARTBEAT_INTERVAL = 45.0   # 心跳间隔(秒)
 
 
+def _parse_pipe_text(data: bytes, field_names: list[str]) -> list[dict]:
+    """解析 GBK 管道分隔文本文件."""
+    text = data.decode("gbk", "ignore")
+    out = []
+    for ln in text.split("\n"):
+        ln = ln.strip("\r")
+        if not ln or ln.startswith("#"):
+            continue
+        f = ln.split("|")
+        if len(f) < 2:
+            continue
+        row = {}
+        for i, name in enumerate(field_names):
+            row[name] = f[i] if i < len(f) else ""
+        out.append(row)
+    return out
+
+
 class StockClient:
     """7709 股票行情客户端，对齐 pytdx TdxHq_API."""
 
     def __init__(self, hosts: Optional[list] = None, timeout: float = 5.0,
                  use_ip_health: bool = True, rate_limit: float = DEFAULT_RATE_LIMIT,
-                 quote_host: Optional[str] = "60.12.136.250:7709",
+                 quote_host: Optional[str] = None,
                  auto_reconnect: bool = True):
         self.auto_reconnect = auto_reconnect
         if hosts:
@@ -243,12 +263,12 @@ class StockClient:
         """发送请求包并接收响应（带锁 + 速率限制 + 指数退避重连 + 跨主机故障转移）。"""
         with self._lock:
             if not self.sock:
-                raise ConnectionError("not connected")
+                self.connect()
             self._throttle()
             try:
                 self.sock.send(pkg)
                 return self._recv_response(self.sock)
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e:
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, ConnectionError) as e:
                 self.sock = None
                 last_err = e
                 # 第一阶段：同主机指数退避重试
@@ -258,7 +278,7 @@ class StockClient:
                         self._connect_once(f"{self._current_host}:{self._current_port}")
                         self.sock.send(pkg)
                         return self._recv_response(self.sock)
-                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e2:
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, TimeoutError, ConnectionError) as e2:
                         self.sock = None
                         last_err = e2
                         continue
@@ -276,18 +296,9 @@ class StockClient:
                         self._connect_once(new_host)
                         self.sock.send(pkg)
                         return self._recv_response(self.sock)
-                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as e2:
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, ConnectionError) as e2:
                         self.sock = None
                         last_err = e2
-                # 第三阶段：NOP 重连 — 服务器可能拒绝了该命令，
-                # 不再重发原包，静默重连以保证后续命令仍可用
-                for host_str in self._hosts_flat:
-                    try:
-                        self._connect_once(host_str)
-                        break
-                    except Exception:
-                        self.sock = None
-                        continue
                 raise ConnectionError(f"connection lost after retry+failover: {last_err}") from e
 
     def _quote_connect(self):
@@ -308,7 +319,7 @@ class StockClient:
         self._quote_sock = sock
 
     def _quote_send_recv(self, pkg: bytes) -> bytes:
-        """通过专用快照行情连接发送请求并接收响应。未配置 quote_host 时回退到主连接。"""
+        """通过专用快照行情连接发送请求并接收响应。未配置 quote_host 或连接失败时回退到主连接。"""
         if not self._quote_host:
             return self._send_recv(pkg)
         with self._quote_lock:
@@ -326,12 +337,7 @@ class StockClient:
                     return self._recv_response(self._quote_sock)
                 except Exception:
                     self._quote_sock = None
-                    # NOP 重连 quote 连接，不重发原包
-                    try:
-                        self._quote_connect()
-                    except Exception:
-                        pass
-                    raise ConnectionError(f"quote connection lost after reconnect: {e}") from e
+                    return self._send_recv(pkg)
 
     def _safe_send_recv(self, pkg: bytes) -> bytes:
         """安全发送接收，捕获 remote closed 等异常，返回空响应."""
@@ -411,6 +417,29 @@ class StockClient:
             quote_data["name"] = self._get_name(code)
         return quote_data
 
+    def _format_kline_time(self, r: dict, period: str) -> str:
+        y = r.get('year', 0)
+        m = r.get('month', 1)
+        d = r.get('day', 1)
+        h = r.get('hour', 0)
+        mn = r.get('minute', 0)
+        if period in ('day', 'week', 'month'):
+            return f"{y:04d}{m:02d}{d:02d}"
+        return f"{y:04d}{m:02d}{d:02d}{h:02d}{mn:02d}"
+
+    def _make_kline(self, r: dict, period: str) -> Kline:
+        return Kline(
+            time=self._format_kline_time(r, period),
+            open=r.get('open', 0.0),
+            high=r.get('high', 0.0),
+            low=r.get('low', 0.0),
+            close=r.get('close', 0.0),
+            volume=int(r.get('vol', 0)),
+            amount=r.get('amount', 0.0),
+            position=r.get('position', 0),
+            settlement=r.get('settlement', 0.0),
+        )
+
     def kline(self, code: str, period: str = "day", start: int = 0, count: int = 800,
               adjust: str = "", anchor: str = "") -> list[Kline]:
         """获取K线数据。空数据时自动故障转移到其他主机。"""
@@ -420,36 +449,9 @@ class StockClient:
         data = self._send_recv(_b_kline(mid, num, cat, start, count))
         rows = _p_kline(data, cat, code, coefficient=coeff)
         if start == 0 and self.auto_reconnect:
-            # 触发故障转移：无数据，或返回条数远少于请求条数（云镜像截断为 3 条）
             if not rows or (count > 10 and len(rows) < count * 0.3):
                 rows = self._find_host_returning_kline(code, period, start, count)
-        result = []
-        for r in rows:
-            y = r.get('year', 0)
-            m = r.get('month', 1)
-            d = r.get('day', 1)
-            h = r.get('hour', 0)
-            mn = r.get('minute', 0)
-            if period == 'day':
-                time_str = f"{y:04d}{m:02d}{d:02d}"
-            elif period == 'week':
-                time_str = f"{y:04d}{m:02d}{d:02d}"
-            elif period == 'month':
-                time_str = f"{y:04d}{m:02d}{d:02d}"
-            else:
-                time_str = f"{y:04d}{m:02d}{d:02d}{h:02d}{mn:02d}"
-            result.append(Kline(
-                time=time_str,
-                open=r.get('open', 0.0),
-                high=r.get('high', 0.0),
-                low=r.get('low', 0.0),
-                close=r.get('close', 0.0),
-                volume=int(r.get('vol', 0)),
-                amount=r.get('amount', 0.0),
-                position=r.get('position', 0),
-                settlement=r.get('settlement', 0.0),
-            ))
-        return result
+        return [self._make_kline(r, period) for r in rows]
 
     def _find_host_returning_kline(self, code: str, period: str,
                                      start: int = 0, count: int = 800) -> list:
@@ -498,31 +500,7 @@ class StockClient:
         while empty_pages < 3:
             data = self._send_recv(_b_kline(mid, num, cat, start, batch_size))
             rows = _p_kline(data, cat, code, coefficient=coeff)
-            for r in rows:
-                y = r.get('year', 0)
-                m = r.get('month', 1)
-                d = r.get('day', 1)
-                h = r.get('hour', 0)
-                mn = r.get('minute', 0)
-                if period == 'day':
-                    time_str = f"{y:04d}{m:02d}{d:02d}"
-                elif period == 'week':
-                    time_str = f"{y:04d}{m:02d}{d:02d}"
-                elif period == 'month':
-                    time_str = f"{y:04d}{m:02d}{d:02d}"
-                else:
-                    time_str = f"{y:04d}{m:02d}{d:02d}{h:02d}{mn:02d}"
-                all_bars.append(Kline(
-                    time=time_str,
-                    open=r.get('open', 0.0),
-                    high=r.get('high', 0.0),
-                    low=r.get('low', 0.0),
-                    close=r.get('close', 0.0),
-                    volume=int(r.get('vol', 0)),
-                    amount=r.get('amount', 0.0),
-                    position=r.get('position', 0),
-                    settlement=r.get('settlement', 0.0),
-                ))
+            all_bars.extend(self._make_kline(r, period) for r in rows)
             if not rows:
                 empty_pages += 1
                 start += batch_size
@@ -627,16 +605,18 @@ class StockClient:
         """今日分笔."""
         mid, _, num = split_code(code)
         data = self._send_recv(_b_today_trade(mid, num, start, count))
-        rows = _p_today_trade(data)
-        return [Trade(time=str(r.get('time', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), direction=r.get('type', ''), nature=r.get('nature', '')) for r in rows]
+        coeff = self._get_coefficient(mid, num)
+        rows = _p_today_trade(data, coefficient=coeff)
+        return [Trade(time=str(r.get('time', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), direction=str(r.get('buyorsell', 0)), nature='') for r in rows]
 
     def history_trade(self, code: str, tdate, start: int = 0, count: int = 900) -> list[Trade]:
         """历史分笔."""
         mid, _, num = split_code(code)
         d = self._parse_tdate(tdate)
         data = self._send_recv(_b_history_trade(mid, num, start, count, d))
-        rows = _p_history_trade(data)
-        return [Trade(time=str(r.get('time', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), direction=r.get('type', ''), nature=r.get('nature', '')) for r in rows]
+        coeff = self._get_coefficient(mid, num)
+        rows = _p_history_trade(data, coefficient=coeff)
+        return [Trade(time=str(r.get('time', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), direction=str(r.get('buyorsell', 0)), nature='') for r in rows]
 
     def xdxr(self, code: str) -> list[EquityChange]:
         """除权除息信息."""
@@ -697,6 +677,108 @@ class StockClient:
         data = self._send_recv(_b_report_file(filename, offset))
         return _p_report_file(data)
 
+    def get_report_file_raw(self, filename: str) -> bytes:
+        """下载报表文件完整内容（自动分块拼接）."""
+        chunk_size = 0x7530
+        buf = bytearray()
+        offset = 0
+        while True:
+            r = self.report_file(filename, offset)
+            if not r or r.get("chunksize", 0) == 0:
+                break
+            buf.extend(r["chunkdata"])
+            offset += r["chunksize"]
+            if r["chunksize"] < chunk_size:
+                break
+        return bytes(buf)
+
+    def get_zhb_files(self) -> dict[str, bytes]:
+        """下载 zhb.zip 并解压，返回 {文件名: 原始字节}."""
+        raw = self.get_report_file_raw("zhb.zip")
+        if not raw:
+            return {}
+        out = {}
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            for name in zf.namelist():
+                out[name] = zf.read(name)
+        return out
+
+    def get_tdx_zs(self) -> list[dict]:
+        """解析 tdxzs.cfg → 板块名↔指数代码列表."""
+        return _parse_pipe_text(self._get_zhb_file("tdxzs.cfg"),
+                                ["name", "code", "type", "subtype", "flag", "ref"])
+
+    def get_tdx_bk(self) -> list[dict]:
+        """解析 tdxbk.cfg → 概念板块简称↔全称."""
+        return _parse_pipe_text(self._get_zhb_file("tdxbk.cfg"),
+                                ["flag", "short", "full", "flag2"])
+
+    def get_tdx_stat(self) -> list[dict]:
+        """解析 tdxstat.cfg → 全市场个股综合统计指标."""
+        return _parse_pipe_text(self._get_zhb_file("tdxstat.cfg"),
+                                ["market", "code", "field2", "field3", "date",
+                                 "field5", "field6", "field7", "field8", "field9",
+                                 "field10", "field11", "field12", "field13", "field14",
+                                 "field15", "field16", "field17", "field18", "field19",
+                                 "field20", "field21", "field22", "field23", "field24",
+                                 "field25", "field26", "field27", "field28", "field29",
+                                 "field30", "field31", "field32", "field33", "field34"])
+
+    def get_tdx_stat2(self) -> list[dict]:
+        """解析 tdxstat2.cfg → 全市场个股资金流向 + 板块归属."""
+        return _parse_pipe_text(self._get_zhb_file("tdxstat2.cfg"),
+                                ["market", "code", "date", "amount", "field4",
+                                 "amount_prev", "field6", "field7", "field8", "field9",
+                                 "field10", "field11", "field12", "block_index",
+                                 "field14", "field15", "ipo_price", "high_52w", "low_52w",
+                                 "field19", "field20"])
+
+    def get_xgsg(self) -> list[dict]:
+        """解析 xgsg.cfg → 新股申购列表."""
+        return _parse_pipe_text(self._get_zhb_file("xgsg.cfg"),
+                                ["market", "code", "date", "issue_price", "field4",
+                                 "field5", "field6", "field7", "field8", "field9",
+                                 "field10", "field11", "field12", "field13", "name",
+                                 "field15", "field16", "field17"])
+
+    def get_tdx_hy(self) -> list[dict]:
+        """解析 tdxhy.cfg → 每只股票的通达信/申万行业归属."""
+        raw = self.get_block_file_parsed_raw("tdxhy.cfg")
+        lines = raw.decode("gbk", "ignore").split("\n")
+        out = []
+        for ln in lines:
+            ln = ln.strip("\r")
+            if not ln:
+                continue
+            f = ln.split("|")
+            if len(f) < 3:
+                continue
+            r = {"market": int(f[0]) if f[0].isdigit() else 0, "code": f[1], "tdx_hy": f[2]}
+            r["sw_hy"] = f[5] if len(f) >= 6 else f[-1]
+            out.append(r)
+        return out
+
+    def _get_zhb_file(self, name: str) -> bytes:
+        """从 zhb.zip 缓存中获取指定文件内容."""
+        if not hasattr(self, "_zhb_cache"):
+            self._zhb_cache = self.get_zhb_files()
+        return self._zhb_cache.get(name, b"")
+
+    def get_block_file_parsed_raw(self, filename: str) -> bytes:
+        """下载任意板块/配置文件原始字节（自动分块）. 适用于 tdxhy.cfg 等文本文件."""
+        meta = self.block_info_meta(filename)
+        size = meta.get("size", 0)
+        if not size:
+            return b""
+        chunk_size = 0x7530
+        buf = bytearray()
+        offset = 0
+        while offset < size:
+            piece = self.block_info(filename, offset, min(chunk_size, size - offset))
+            buf.extend(piece)
+            offset += chunk_size
+        return bytes(buf)
+
     # ---- 新增命令 ----
 
     def vol_profile(self, code: str) -> dict:
@@ -709,8 +791,9 @@ class StockClient:
     def index_momentum(self, code: str):
         """指数动能."""
         mid, _, num = split_code(code)
+        coeff = self._get_coefficient(mid, num)
         data = self._send_recv(_b_index_momentum(mid, num))
-        return _p_index_momentum(data)
+        return _p_index_momentum(data, coefficient=coeff)
 
     def index_info(self, code: str) -> dict:
         """指数成分股/行情."""
@@ -779,7 +862,9 @@ class StockClient:
         for code in codes:
             mid, _, num = split_code(code)
             stocks.append((mid, num))
-        data = self._quote_send_recv(_b_quotes_encrypt(stocks))
+        data = self._quote_safe_send_recv(_b_quotes_encrypt(stocks))
+        if len(data) < 2:
+            return []
         return _p_quotes_encrypt(data)
 
     def recent_minute(self, code: str, tdate=None) -> list[dict]:
@@ -795,7 +880,7 @@ class StockClient:
 
     def limits(self, start: int = 0, count: int = 2000) -> list[dict]:
         """涨跌停限制 (0x0452)."""
-        data = self._quote_send_recv(_b_limits(start, count))
+        data = self._quote_safe_send_recv(_b_limits(start, count))
         return _p_limits(data)
 
     def sparkline(self, code: str) -> list[float]:
@@ -972,14 +1057,12 @@ class StockClient:
     def market_stat(self) -> dict:
         """市场统计（market-stat）.
 
-        通过标准协议查询特殊指数 880005/880001/880006 计算涨跌家数、总市值等.
+        通过标准协议查询特殊指数 sh880005/sh880001/sh880006 计算涨跌家数、总市值等.
         """
-        from datetime import date as dt_date
-        today_str = dt_date.today().strftime("%Y%m%d")
         try:
-            q1 = self.quote(f"sh{today_str}0005")   # 880005
-            q2 = self.quote(f"sh{today_str}0001")   # 880001
-            q3 = self.quote(f"sh{today_str}0006")   # 880006
+            q1 = self.quote("sh880005")
+            q2 = self.quote("sh880001")
+            q3 = self.quote("sh880006")
         except Exception:
             return {}
 
@@ -991,7 +1074,7 @@ class StockClient:
         limit_down = round(q3.get("open", 0) * 10) if q3 else 0
         market_cap = q2.get("amount", 0) if q2 else 0
         total_amount = q1.get("amount", 0) if q1 else 0
-        total_volume = q1.get("volume", 0) if q1 else 0
+        total_volume = q1.get("vol", 0) if q1 else 0
 
         return {
             "up_count": up,
@@ -1004,7 +1087,84 @@ class StockClient:
             "total_amount": round(total_amount, 2),
             "total_volume": total_volume,
             "market_cap": round(market_cap, 2),
+            "today": str(date.today()),
         }
+
+    # ---- 增强功能 ----
+
+    def get_blocks_with_index(self, block_type: int = 0) -> list[dict]:
+        """获取带指数代码的板块列表 (板块指数桥接).
+        
+        Args:
+            block_type: 0=行业/指数板块, 2=概念板块, 3=风格板块
+        """
+        from ..block_bridge import BlockBridge
+        bridge = BlockBridge(self)
+        bridge.load_bridge_data()
+        
+        if block_type == 2:
+            filename = "block_gn.dat"
+        elif block_type == 3:
+            filename = "block_fg.dat"
+        else:
+            filename = "block_zs.dat"
+        
+        raw_blocks = self.get_block_file_parsed(filename)
+        result = []
+        for block in raw_blocks:
+            item = dict(block)
+            index_code = bridge._get_index_by_name(block['name'])
+            if index_code:
+                item['index'] = index_code
+                item['index_name'] = bridge._get_index_name(index_code)
+            result.append(item)
+        return result
+
+    def block_members(self, block_code: str) -> list[dict]:
+        """获取板块成分股 (通过板块指数代码桥接).
+        
+        Args:
+            block_code: 板块代码或名称
+        """
+        from ..block_bridge import BlockBridge
+        bridge = BlockBridge(self)
+        bridge.load_bridge_data()
+        
+        # 查找板块
+        target = None
+        for b in bridge._blocks:
+            if b.index == block_code or b.name == block_code:
+                target = b
+                break
+        
+        if not target:
+            return []
+        
+        result = []
+        for code in target.codes[:50]:
+            try:
+                quote = self.quote(code)
+                if quote:
+                    result.append({
+                        'code': code,
+                        'name': quote.get('name', ''),
+                        'price': quote.get('price', 0),
+                        'change_pct': quote.get('change_pct', 0),
+                    })
+            except Exception:
+                continue
+        return result
+
+    def get_company_info(self, code: str, filename: str) -> Optional[str]:
+        """获取公司配置文件内容.
+        
+        Args:
+            code: 股票代码 (如 sh000001)
+            filename: 文件名 (如 tdxzs.cfg, tdxbk.cfg)
+        """
+        mid, _, num = split_code(code)
+        data = self._send_recv(_b_company_info_content(mid, num, filename, 0, 0))
+        return _p_company_info_content(data)
 
     def server_info(self) -> dict:
         """服务器信息（server-info）."""

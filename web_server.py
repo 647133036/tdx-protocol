@@ -478,7 +478,7 @@ function showSummary(containerId, items) {
 }
 
 function showQuoteDetail(containerId, q) {
-  const fields = ["code","name","price","last_close","open","high","low","volume","amount",
+  const fields = ["code","name","price","last_close","open","high","low","vol","amount",
                   "bid1","ask1","bid_vol1","ask_vol1"];
   let html = '<div class="summary"><div class="row">';
   for (const f of fields) {
@@ -640,7 +640,7 @@ async function loadFinance() {
     html += '<div class="item">代码: <span>' + data.code + '</span></div>';
     html += '<div class="item">总股本: <span>' + fmtNum(data.finance.zongguben) + '</span></div>';
     html += '<div class="item">流通股本: <span>' + fmtNum(data.finance.liutongguben) + '</span></div>';
-    html += '<div class="item">每股收益: <span>' + fmtNum(data.finance.eps) + '</span></div>';
+    html += '<div class="item">每股收益: <span>' + fmtNum(data.finance.shuihoulirun) + '</span></div>';
     html += '<div class="item">每股净资产: <span>' + fmtNum(data.finance.jingzichan) + '</span></div>';
     html += '<div class="item">主营业务收入: <span>' + fmtNum(data.finance.zhuyingshouru) + '</span></div>';
     html += '<div class="item">净利润: <span>' + fmtNum(data.finance.shuihoulirun) + '</span></div>';

@@ -17,15 +17,16 @@ from .commands import (
     CMD_EX_TRADE_TODAY, CMD_EX_TRADE_HISTORY,
     CMD_EX_TICK_CHART, CMD_EX_HISTORY_TICK_CHART,
     CMD_EX_CHART_SAMPLING, CMD_EX_TABLE, CMD_EX_TABLE_DETAIL,
-    CMD_EX_QUOTES,
+    CMD_EX_QUOTES, CMD_EX_COUNT,
     PREFIX, FUTURES_HOSTS, HANDSHAKE_DATA,
-    _b_ex_heartbeat, _b_ex_markets, _b_ex_codes,
+    _b_ex_heartbeat, _b_ex_markets, _b_ex_codes, _b_ex_count,
     _b_ex_quote, _b_ex_quote_batch, _b_ex_kline, _b_ex_kline_range,
     _b_ex_minute_today, _b_ex_minute_history,
     _b_ex_trade_today, _b_ex_trade_history,
     _b_ex_tick_chart, _b_ex_history_tick_chart,
     _b_ex_chart_sampling, _b_ex_table, _b_ex_quotes,
-    _p_ex_markets, _p_ex_codes, _p_ex_quote, _p_ex_quote_batch,
+    _p_ex_markets, _p_ex_codes, _p_ex_count,
+    _p_ex_quote, _p_ex_quote_batch,
     _p_ex_kline, _p_ex_kline_range, _p_ex_minute, _p_ex_minute_history, _p_ex_trade,
     _p_ex_tick_chart, _p_ex_history_tick_chart,
     _p_ex_chart_sampling, _p_ex_table, _p_ex_quotes,
@@ -196,6 +197,11 @@ class FuturesClient:
             return self._exec(cmd, payload, _retry=_retry + 1)
 
     # -- 市场/代码 --
+    def count(self) -> int:
+        """获取品种总数."""
+        r = self._exec(CMD_EX_COUNT, _b_ex_count())
+        return _p_ex_count(r.data)
+
     def markets(self) -> list[dict]:
         r = self._exec(CMD_EX_MARKETS, _b_ex_markets())
         return _p_ex_markets(r.data)
@@ -205,23 +211,44 @@ class FuturesClient:
         return _p_ex_codes(r.data)
 
     def codes_all(self, mid: int) -> list[dict]:
+        ranges = self._find_market_ranges(mid)
         all_codes = []
+        for rstart, rend in ranges:
+            pos = rstart
+            while pos < rend:
+                batch = self.codes(mid, pos, 200)
+                if not batch:
+                    break
+                matched = [r for r in batch if r.get("market_id") == mid]
+                all_codes.extend(matched)
+                pos += 200
+        return all_codes
+
+    def _find_market_ranges(self, mid: int, coarse_step: int = 2000) -> list[tuple[int, int]]:
+        page_size = min(coarse_step, 1000)
+        if page_size < coarse_step:
+            coarse_step = page_size
+        ranges = []
         start = 0
-        empty_pages = 0
-        while start < 50000:
-            batch = self.codes(mid, start, 200)
+        in_range = False
+        range_start = 0
+        while start < 200000:
+            batch = self.codes(0, start, page_size)
             if not batch:
                 break
-            matched = [r for r in batch if r.get("market_id") == mid]
-            all_codes.extend(matched)
-            if matched:
-                empty_pages = 0
+            batch_mids = {r.get("market_id") for r in batch}
+            if mid in batch_mids:
+                if not in_range:
+                    in_range = True
+                    range_start = start
             else:
-                empty_pages += 1
-                if empty_pages >= 10:
-                    break
-            start += 200
-        return all_codes
+                if in_range:
+                    ranges.append((range_start, start))
+                    in_range = False
+            start += coarse_step
+        if in_range:
+            ranges.append((range_start, 200000))
+        return ranges or [(0, 200000)]
 
     # -- 行情 --
     def quote(self, mid: int, code: str) -> Quote:
@@ -310,22 +337,21 @@ class FuturesClient:
         r = self._exec(CMD_EX_QUOTES, _b_ex_quotes(code_list))
         return _p_ex_quotes(r.data)
 
-    def get_main_contract(self, product: str = "IF", lookahead_months: int = 3) -> str | None:
-        """自动探测活跃合约。
-        
-        从当前月份起向后轮询 lookahead_months 个月，
-        返回第一个 price > 0 的合约代码。
-        """
+    def get_main_contract(self, product: str = "IF", lookahead_months: int = 3,
+                          mid: int = 47) -> str | None:
         now = datetime.now()
         for offset in range(lookahead_months):
             target = now + timedelta(days=32 * offset)
-            code = f"{product}{target.strftime('%y%m')}"
-            try:
-                q = self.quote(47, code)
-                if hasattr(q, 'price') and q.price > 0:
-                    return code
-            except Exception:
-                continue
+            ym = target.strftime('%y%m')
+            # 部分交易所用小写字母前缀
+            for prefix in [product, product.lower()]:
+                code = f"{prefix}{ym}"
+                try:
+                    q = self.quote(mid, code)
+                    if hasattr(q, 'price') and q.price > 0:
+                        return code
+                except Exception:
+                    continue
         return None
 
     def safe_exec(self, func, *args, **kwargs):

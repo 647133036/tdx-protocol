@@ -132,9 +132,9 @@ class TestParsers(unittest.TestCase):
         # count=3, get_price encoded values: +10(0x0A), -5(0x45), +15(0x0F)
         data = struct.pack("<H", 3)
         data += bytes([0x0A, 0x45, 0x0F])
-        result = _p_index_momentum(data)
+        result = _p_index_momentum(data, coefficient=0.01)
         self.assertEqual(len(result), 3)
-        self.assertEqual(result, [10, 5, 20])
+        self.assertEqual(result, [0.1, 0.05, 0.2])
 
     def test_index_info(self):
         data = struct.pack("<IB6sH", 0, 1, b"000001", 0)

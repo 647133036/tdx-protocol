@@ -32,6 +32,11 @@ import json
 import sys
 from datetime import date
 
+try:
+    import dateutil.parser
+except ImportError:
+    dateutil = None
+
 from tdxproto import StockClient, FuturesClient
 from tdxproto import compute_factors, get_equity_at, calc_turnover, parse_xdxr
 
@@ -80,13 +85,23 @@ def stock_minute(c, a):
     else:
         js(c.recent_minute(a.code))
 
-def stock_aux(c, a): js(c.aux(a.code, a.kind))
-def stock_sparkline(c, a): js(c.sparkline(a.code, a.selector, a.window))
+def stock_aux(c, a): js(c.aux(a.code))
+def stock_sparkline(c, a): js(c.sparkline(a.code))
 
 def stock_trade(c, a):
     if a.date:
         if a.all:
-            js(c.history_trade_all(a.code, a.date))
+            all_rows = []
+            start = 0
+            while True:
+                batch = c.history_trade(a.code, a.date, start, 900)
+                if not batch:
+                    break
+                all_rows.extend(batch)
+                if len(batch) < 900:
+                    break
+                start += len(batch)
+            js(all_rows)
         else:
             js(c.history_trade(a.code, a.date, a.start, a.count))
     else:
@@ -116,23 +131,24 @@ def stock_limits(c, a): js(c.limits(a.start))
 
 def stock_turnover(c, a):
     eq = c.capital_changes(a.code)
-    fr = c.finance([a.code])
+    fr = c.finance(a.code)
     float_shares = 0.0
-    if fr:
-        float_shares = fr[0].float_shares
-    if float_shares == 0:
+    if fr and "error" not in fr:
+        float_shares = fr.get("liutongguben", 0.0) / 10000
+    if not float_shares:
         eq_float, _ = get_equity_at(eq, date.today())
         float_shares = eq_float
-    qs = c.quote([a.code])
+    qs = c.quote(a.code)
     if qs:
-        to = calc_turnover(qs[0].volume, float_shares)
-        print(f"换手率: {to:.2f}%  (成交量={qs[0].volume}, 流通股本={float_shares:.0f}万)")
+        vol = qs.get("vol", 0)
+        to = calc_turnover(vol, float_shares)
+        print(f"换手率: {to:.2f}%  (成交量={vol}, 流通股本={float_shares:.0f}万)")
 
 def stock_info(c, a):
     """一键输出全部可获取数据。"""
     code = a.code
     result = {"code": code}
-    try: result["quote"] = [js_inner(c.quote([code]))]
+    try: result["quote"] = js_inner(c.quote(code))
     except Exception as e: result["quote"] = {"error": str(e)}
     try: result["minute"] = js_inner(c.recent_minute(code))
     except Exception as e: result["minute"] = {"error": str(e)}
@@ -142,6 +158,19 @@ def stock_info(c, a):
     except Exception as e: result["equity"] = {"error": str(e)}
     try: result["finance"] = js_inner(c.finance([code]))
     except Exception as e: result["finance"] = {"error": str(e)}
+    js(result)
+
+def stock_blocks(c, a):
+    js(c.get_blocks_with_index(a.type))
+
+def stock_block_members(c, a):
+    js(c.block_members(a.block_code))
+
+def stock_workday(c, a):
+    import dateutil.parser
+    d = dateutil.parser.isoparse(a.date).date() if a.date else None
+    wm = get_workday_manager(c)
+    result = {"date": str(d or date.today()), "is_workday": wm.is_workday(d)}
     js(result)
 
 
@@ -158,6 +187,7 @@ def js_inner(obj):
 # ========== Futures ==========
 
 def fut_markets(c, a): js(c.markets())
+def fut_count(c, a): js(c.count())
 def fut_codes(c, a):
     if a.all: js(c.codes_all(a.market))
     else: js(c.codes(a.market, a.start, a.count))
@@ -257,8 +287,8 @@ def main():
     a = ss.add_parser("kline", help="0x052d K线(含复权)"); a.add_argument("code"); a.add_argument("--period", default="day"); a.add_argument("--start", type=int, default=0); a.add_argument("--count", type=int, default=100); a.add_argument("--adjust", default=""); a.add_argument("--anchor", default="")
     a = ss.add_parser("kline-all", help="自动翻页拉全量K线"); a.add_argument("code"); a.add_argument("--period", default="day"); a.add_argument("--adjust", default="")
     a = ss.add_parser("minute", help="0x0feb/0x0537 分时"); a.add_argument("code"); a.add_argument("--date", default=None)
-    a = ss.add_parser("aux", help="0x051b 分时副图"); a.add_argument("code"); a.add_argument("--kind", default="buy_sell")
-    a = ss.add_parser("sparkline", help="0x0fd1 小走势图"); a.add_argument("code"); a.add_argument("--selector", type=int, default=1); a.add_argument("--window", type=int, default=20)
+    a = ss.add_parser("aux", help="0x051b 分时副图"); a.add_argument("code")
+    a = ss.add_parser("sparkline", help="0x0fd1 小走势图"); a.add_argument("code")
     a = ss.add_parser("trade", help="0x0fc6/0x0fc5 成交明细"); a.add_argument("code"); a.add_argument("date", nargs="?"); a.add_argument("--start", type=int, default=0); a.add_argument("--count", type=int, default=100); a.add_argument("--all", action="store_true")
     a = ss.add_parser("auction", help="0x056a 集合竞价"); a.add_argument("code"); a.add_argument("--mode", type=int, default=3)
     a = ss.add_parser("equity", help="0x000f 股本变迁+除权除息"); a.add_argument("code")
@@ -266,12 +296,16 @@ def main():
     a = ss.add_parser("limits", help="0x0452 涨跌停限制"); a.add_argument("--start", type=int, default=0)
     a = ss.add_parser("turnover", help="本地计算换手率"); a.add_argument("code")
     a = ss.add_parser("info", help="一键全部数据"); a.add_argument("code")
+    a = ss.add_parser("blocks", help="板块列表(含指数代码)"); a.add_argument("--type", type=int, default=0)
+    a = ss.add_parser("block-members", help="板块成分股"); a.add_argument("block_code")
+    a = ss.add_parser("workday", help="工作日判断"); a.add_argument("--date", default=None)
 
     # Futures
     f = sub.add_parser("futures", help="7727 期货行情")
     fs = f.add_subparsers(dest="cmd")
     a = fs.add_parser("markets", help="0x23F4 交易所列表")
     a = fs.add_parser("codes", help="0x23F5 代码表"); a.add_argument("market", type=int); a.add_argument("--start", type=int, default=0); a.add_argument("--count", type=int, default=200); a.add_argument("--all", action="store_true")
+    a = fs.add_parser("count", help="0x23F0 品种数量")
     a = fs.add_parser("quote", help="0x23FA 五档行情"); a.add_argument("code"); a.add_argument("--market", type=int, default=47)
     a = fs.add_parser("quote-batch", help="0x2400 批量行情"); a.add_argument("--market", type=int, default=47); a.add_argument("--start", type=int, default=0); a.add_argument("--count", type=int, default=200)
     a = fs.add_parser("kline", help="0x23FF K线"); a.add_argument("code"); a.add_argument("--market", type=int, default=47); a.add_argument("--period", default="day"); a.add_argument("--start", type=int, default=0); a.add_argument("--count", type=int, default=100)
@@ -304,13 +338,16 @@ def main():
                 "trade": stock_trade, "auction": stock_auction,
                 "equity": stock_equity, "finance": stock_finance,
                 "limits": stock_limits, "turnover": stock_turnover, "info": stock_info,
+                "blocks": stock_blocks, "block-members": stock_block_members,
+                "workday": stock_workday,
             }.get(args.cmd)
             if h: h(c, args)
 
     elif args.proto == "futures":
         with FuturesClient(timeout=5) as c:
             h = {
-                "markets": fut_markets, "codes": fut_codes,
+                "markets": fut_markets, "count": fut_count,
+                "codes": fut_codes,
                 "quote": fut_quote, "quote-batch": fut_quote_batch,
                 "kline": fut_kline, "minute": fut_minute, "trade": fut_trade,
             }.get(args.cmd)
