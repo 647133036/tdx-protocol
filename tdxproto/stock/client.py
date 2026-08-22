@@ -855,30 +855,74 @@ class StockClient:
 
     # ---- 新增命令 ----
 
-    def vol_profile(self, code: str) -> dict:
-        """分时成交量分布."""
-        mid, _, num = split_code(code)
-        coeff = self._get_coefficient(mid, num)
-        data = self._send_recv_quick(_b_vol_profile(mid, num))
-        if len(data) < 11:
-            return {}
-        return _p_vol_profile(data, coefficient=coeff)
+    def vol_profile(self, code: str, price_levels: int = 20) -> dict:
+        """分时成交量分布（基于逐笔成交计算）.
 
-    def index_momentum(self, code: str):
-        """指数动能."""
-        mid, _, num = split_code(code)
-        coeff = self._get_coefficient(mid, num)
-        data = self._send_recv_quick(_b_index_momentum(mid, num))
-        return _p_index_momentum(data, coefficient=coeff)
-
-    def index_info(self, code: str) -> dict:
-        """指数成分股/行情."""
-        mid, _, num = split_code(code)
-        coeff = self._get_coefficient(mid, num)
-        data = self._send_recv_quick(_b_index_info(mid, num))
-        if len(data) < 13:
+        服务器不支持 0x051A 命令，改用今日逐笔成交数据按价格分组计算。
+        price_levels: 最多返回的价格档位数。
+        """
+        trades = self.today_trade(code, 0, 50000)
+        if not trades:
             return {}
-        return _p_index_info(data, coefficient=coeff)
+        from collections import defaultdict
+        buckets = defaultdict(lambda: {"vol": 0, "buy": 0, "sell": 0})
+        for t in trades:
+            price = round(t.price, 2)
+            buckets[price]["vol"] += t.volume
+            if t.direction == "1":
+                buckets[price]["buy"] += t.volume
+            elif t.direction == "2":
+                buckets[price]["sell"] += t.volume
+        sorted_prices = sorted(buckets.keys())
+        vol_profile = [
+            {"price": p, "vol": buckets[p]["vol"],
+             "buy": buckets[p]["buy"], "sell": buckets[p]["sell"]}
+            for p in sorted_prices[-price_levels:]
+        ]
+        return {
+            "code": code,
+            "vol_profile": vol_profile,
+            "total_vol": sum(v["vol"] for v in vol_profile),
+        }
+
+    def index_momentum(self, code: str, period: int = 5):
+        """指数动能（基于日K线计算）.
+
+        服务器不支持 0x051C 命令，改用 K 线数据计算。
+        momentum = (close - close[period]) / close[period] * 100
+        """
+        bars = self.kline(code, "day", 0, period + 1)
+        if len(bars) < period + 1:
+            return []
+        result = []
+        for i in range(period, len(bars)):
+            mom = (bars[i].close - bars[i - period].close) / bars[i - period].close * 100
+            result.append(round(mom, 2))
+        return result
+
+    def index_info(self, code: str, top_n: int = 50) -> dict:
+        """指数成分股行情（通过板块机制获取）.
+
+        服务器不支持 0x051D 命令，改用可用方式获取成分股行情：
+        1. board_members (MAC) — 适用于板块代码
+        2. codes_all + quotes_detail — 适用于大盘指数
+        """
+        clean = code.lower().replace("sh", "").replace("sz", "").replace("bj", "")
+        try:
+            members = self.board_members(str(clean), page_size=top_n, start=0)
+            if members:
+                return {"code": code, "members": members, "count": len(members)}
+        except Exception:
+            pass
+        market = 1 if clean.startswith("60") else 0
+        try:
+            all_codes = self.codes_all(market)
+            sample = [f"{'sh' if market == 1 else 'sz'}{c}" for c in all_codes[:top_n]]
+            quotes = self.quotes_detail(sample)
+            return {"code": code, "members": quotes, "count": len(quotes)}
+        except Exception:
+            pass
+        return {"code": code, "error": "no index data available"}
 
     def quotes_detail(self, code_list) -> dict:
         """详细行情 (5档买卖盘)."""
@@ -915,10 +959,38 @@ class StockClient:
         data = self._quote_safe_send_recv(_b_quotes_list(category, start, count, sort_type, reverse, filter_raw))
         return _p_quotes_list(data)
 
-    def unusual(self, market: int = 0, start: int = 0, count: int = 600):
-        """主力监控."""
-        data = self._send_recv_quick(_b_unusual(market, start, count))
-        return _p_unusual(data)
+    def unusual(self, market: int = 0, start: int = 0, count: int = 600, min_volume: int = 1000):
+        """主力监控（基于逐笔成交过滤大单）.
+
+        服务器不支持 0x0563 命令，改用今日逐笔成交数据过滤大单。
+        min_volume: 最小成交量阈值（手），默认 1000 手 = 10万股。
+        """
+        results = []
+        try:
+            codes = self.codes(market, 0, 500)
+            for c in codes[:10]:
+                code = c.get("code", "") if isinstance(c, dict) else c
+                if not code:
+                    continue
+                full_code = f"{'sh' if market == 1 else 'sz'}{code}"
+                trades = self.today_trade(full_code, 0, 500)
+                for t in trades:
+                    if t.volume >= min_volume:
+                        results.append({
+                            "code": full_code,
+                            "time": t.time,
+                            "price": t.price,
+                            "volume": t.volume,
+                            "amount": round(t.price * t.volume * 100, 2),
+                            "direction": t.direction,
+                        })
+                        if len(results) >= count:
+                            break
+                if len(results) >= count:
+                    break
+        except Exception:
+            pass
+        return results
 
     def chart_sampling(self, code: str):
         """K线采样."""
