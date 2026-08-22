@@ -674,7 +674,7 @@ def _p_capital_flow(data: bytes) -> dict:
         return result
 
     today = items[0]
-    if len(today) >= 4:
+    if isinstance(today, (list, tuple)) and len(today) >= 4:
         result["main_in"] = round(float(today[0]), 2)
         result["main_out"] = round(float(today[1]), 2)
         result["main_net"] = round(result["main_in"] - result["main_out"], 2)
@@ -683,7 +683,7 @@ def _p_capital_flow(data: bytes) -> dict:
         result["retail_net"] = round(result["retail_in"] - result["retail_out"], 2)
 
     five_days = items[1] if len(items) > 1 else []
-    if len(five_days) >= 6:
+    if isinstance(five_days, (list, tuple)) and len(five_days) >= 6:
         result["mid_net_5d"] = round(float(five_days[4]), 2)
         result["large_net_5d"] = round(float(five_days[3]), 2)
 

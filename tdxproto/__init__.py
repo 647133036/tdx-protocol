@@ -50,7 +50,7 @@ try:
 except ImportError:
     _HAS_MAC = False
 
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 __all__ = [
     "StockClient", "FuturesClient", "MacClient",
     "InfoClient", "InfoCollector",

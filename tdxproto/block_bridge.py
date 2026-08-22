@@ -221,9 +221,9 @@ class BlockBridge:
                 if quote:
                     result.append({
                         'code': code,
-                        'name': quote.get('name', ''),
-                        'price': quote.get('price', 0),
-                        'change_pct': quote.get('change_pct', 0),
+                        'name': quote.name,
+                        'price': quote.price,
+                        'change_pct': quote.change_pct,
                     })
             except Exception:
                 continue
