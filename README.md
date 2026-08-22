@@ -2,7 +2,7 @@
 
 纯 Python 二进制协议实现，零外部依赖。覆盖 7709 A股 + 7727 期货双协议，7615 F10 资讯 HTTP 网关，自动故障转移。
 
-版本 **1.0.3**
+版本 **1.0.4**
 
 ## 特性
 
@@ -16,13 +16,14 @@
 - **本地计算** — 复权因子、换手率、除权除息、竞价快照
 - **数据模型** — 14 个 dataclass 统一表示 (Quote/Kline/Minute/Trade/...)
 - **276 个测试** — 单元/组件全覆盖
+- **50 个接口实测** — A股 24 + 期货 10 + F10 16，全部可用（v1.0.4）
 
 ## 安装
 
-Python 3.9+，零第三方依赖。
+Python 3.9+，零第三方依赖。当前版本通过 GitHub 安装：
 
 ```bash
-pip install tdxproto
+pip install git+https://github.com/647133036/tdx-protocol.git@v1.0.4
 ```
 
 ## 快速开始
@@ -32,7 +33,7 @@ pip install tdxproto
 ```python
 from tdxproto import StockClient
 
-with StockClient() as client:
+with StockClient(use_ip_health=True) as client:
     # K 线 (1m/5m/15m/30m/60m/day/week/month/quarter/year)
     klines = client.kline("sz000001", "day", 0, 10)
     for k in klines:
@@ -49,8 +50,8 @@ with StockClient() as client:
     # 全量 K 线 (自动翻页 + 复权)
     all_bars = client.kline_all("sz000001", "day", adjust="qfq")
 
-    # 批量刷新
-    quotes = client.refresh(["sz000001", "sh600000"])
+    # 批量行情（用 quotes_detail 替代 refresh）
+    quotes = client.quotes_detail(["sz000001", "sh600000"])
 ```
 
 ### 期货行情 (7727)
@@ -58,7 +59,7 @@ with StockClient() as client:
 ```python
 from tdxproto import FuturesClient
 
-with FuturesClient() as fc:
+with FuturesClient(use_ip_health=True) as fc:
     # 自动探测主力合约
     main = fc.get_main_contract("IF", mid=47)
     print(f"IF主力: {main}")
@@ -118,28 +119,29 @@ for a in anns:
 from tdxproto import InfoClient
 
 ic = InfoClient()
-# 实时新闻（100条）
-news = ic.news(0, "000001")
+
+# 实时新闻（注意沪市用 market=1）
+news = ic.news(1, "600519")
 for n in news[:3]:
     print(f"[{n.issue_date}] {n.title}  ({n.source})")
 
 # 公告（含PDF链接）
-anns = ic.announcements(0, "000001")
+anns = ic.announcements(1, "600519")
 for a in anns[:3]:
     print(f"[{a.issue_date}] {a.title}  PDF: {a.pdf_url}")
 
 # 研报
-reports = ic.research_reports("000001")
+reports = ic.research_reports("600519")
 for r in reports[:3]:
     print(f"[{r.date}] {r.rating} {r.analyst}: {r.title}")
 
 # 公司概况
-profile = ic.company_profile("000001")
+profile = ic.company_profile("600519")
 print(profile.rows[0] if profile.rows else "无数据")
 
 # 资产负债表 / 现金流量表（102 行 / 99 行多报告期）
-balance = ic.finance_report("000001", "zcfzb")
-cashflow = ic.finance_report("000001", "xjllb")
+balance = ic.finance_report("600519", "zcfzb")
+cashflow = ic.finance_report("600519", "xjllb")
 for row in balance.rows[:3]:
     print(row)
 ```
@@ -187,7 +189,46 @@ print(members[0])                # {"rank": 1, "code": "600577", "change_pct": 1
 
 字段字典来源：通达信官方「专业财务数据项」编号字典，规律为 `T 编码 = 官方编号 - 1`（资产负债表）和 `T 编码 = 官方编号 - 90`（现金流量表），已用 `StockClient.finance()` 交叉验证。利润表端点（`lrb`）7615 网关仅返回表头无数据，利润数据用 `StockClient.finance()` 获取（营收/净利润/营业利润等 37 字段）。
 
-每个 `snapshot` 中的条目均为结构化的 `dict`，字段含中文语义（如 `holding_pct`、`plan_text`、`pdf_url`），可直接写入数据库或导出 JSON/CSV。
+### 50 接口全量实测结果 (v1.0.4)
+
+```
+=== A股 StockClient (24/24) ===
+  [OK] codes_all(0)          [OK] kline day           [OK] finance
+  [OK] codes(0,0,5)          [OK] kline 1m            [OK] capital_flow
+  [OK] list(0,0,5)           [OK] kline_all day       [OK] stock_blocks
+  [OK] get_tdx_hy            [OK] sparkline           [OK] board_list(150,0)
+  [OK] quote(sh600519)       [OK] today_minute        [OK] market_stat
+  [OK] tick_chart            [OK] xdxr
+  [OK] today_trade           [OK] server_info
+                              [OK] symbol_info
+
+=== 期货 FuturesClient (10/10) ===
+  [OK] markets               [OK] quote IF2608        [OK] today_minute
+  [OK] codes(47,0,5)         [OK] quote_batch         [OK] today_trade
+  [OK] codes_all(47)         [OK] kline day           [OK] get_main_contract
+
+=== F10 InfoClient (16/16) ===
+  [OK] news(1,600519)          [OK] business_composition
+  [OK] announcements(1,600519) [OK] finance_report zcfzb
+  [OK] research_reports        [OK] finance_report xjllb
+  [OK] stock_info              [OK] finance_diagnosis
+  [OK] company_profile         [OK] dividend_financing
+  [OK] stock_score             [OK] topic_ids
+                                [OK] topic_compare
+                                [OK] shareholder_plans
+                                [OK] northbound_holding
+                                [OK] roadshows
+```
+
+5 个接口需特别注意参数：
+
+| 接口 | 注意事项 |
+|------|---------|
+| `news`/`announcements` | 沪市股票用 `market=1`，深市用 `market=0` |
+| `board_members` | 需传正确板块代码，用 `board_list` 先取代码 |
+| `refresh` | 服务端拒绝，用 `quotes_detail` 替代 |
+| `chart_sampling` | 服务端返回空，用 `kline` 替代 |
+| `index_info` | 服务端不支持该命令 |
 
 ### IP 健康监控
 
@@ -247,11 +288,11 @@ auction = auction_0925(trades)
 | | `codes_all(market)` | 全量代码（自动翻页） |
 | **行情** | `quote(code)` | 实时行情（五档盘口） |
 | | `quotes_detail(code_list)` | 批量详细行情 |
-| | `refresh(codes)` | 增量刷新 |
+| | `refresh(codes)` | 增量刷新（服务端拒绝，用 `quotes_detail`） |
 | | `quote_list(category, ...)` | 分类行情列表 |
 | **K线** | `kline(code, period, start, count)` | K 线 |
 | | `kline_all(code, period, adjust)` | 全量 K 线（自动翻页 + 复权） |
-| | `chart_sampling(code)` | K 线采样 |
+| | `chart_sampling(code)` | K 线采样（服务端返回空） |
 | | `sparkline(code)` | 迷你走势 |
 | **分时** | `today_minute(code)` | 今日分时 |
 | | `history_minute(code, date)` | 历史分时 |
@@ -282,7 +323,7 @@ auction = auction_0925(trades)
 | | `market_stat()` | 市场统计 |
 | | `limits(start, count)` | 涨跌停限制 |
 | | `index_momentum(code)` | 指数动能 |
-| | `index_info(code)` | 指数成分股 |
+| | `index_info(code)` | 指数成分股（服务端不支持） |
 | **报表** | `report_file(filename, offset)` | 研报文件 |
 | | `get_report_file_raw(filename)` | 完整研报文件下载 |
 | | `get_zhb_files()` | 综合报表文件 (45 个) |
@@ -343,7 +384,7 @@ auction = auction_0925(trades)
 
 | 分类 | 方法 | 说明 |
 |------|------|------|
-| **实时资讯** | `news(market, code)` | 实时新闻（100条） |
+| **实时资讯** | `news(market, code)` | 实时新闻（100条，沪市 market=1） |
 | | `announcements(market, code)` | 公告列表（含PDF链接） |
 | | `roadshows(market, code)` | 路演列表（含详情链接） |
 | **研报** | `research_reports(code, page, size)` | 研报列表（含评级/分析师） |
@@ -365,7 +406,7 @@ auction = auction_0925(trades)
 | | `topic_compare(code, topic_id, ...)` | 题材内对比排名 |
 | **低层** | `call(entry, body)` | 任意 TQLEX Entry |
 
-`InfoCollector`（推荐用于入库）：`snapshot()` 一次采集 15 类数据；`balance_sheet()`/`cashflow()` 已翻译 T 编码为标准财务科目名；`profile()` 字段全部中文化；`diagnosis()` 返回含同行业对比的财务诊断；`shareholder_plans()` 返回增减持计划（需用有计划的股票测试，如 600519）；`roadshows()` 含路演详情链接；`topic_members()` 需传数字题材 ID（来自 `topics()` 的 `topic_id` 字段，传中文名会返回空）。利润数据用 `StockClient.finance()` 获取。
+`InfoCollector`（推荐用于入库）：`snapshot()` 一次采集 15 类数据；`balance_sheet()`/`cashflow()` 已翻译 T 编码为标准财务科目名；`profile()` 字段全部中文化；`diagnosis()` 返回含同行业对比的财务诊断；`shareholder_plans()` 返回增减持计划；`roadshows()` 含路演详情链接；`topic_members()` 需传数字题材 ID（来自 `topics()` 的 `topic_id` 字段）。利润数据用 `StockClient.finance()` 获取。
 
 ## 数据模型
 
@@ -477,7 +518,8 @@ python -m pytest tdxproto/tests/ -v -m "not system"
 
 ## 变更记录
 
-- **1.0.3** — 修复 6 个 InfoClient bug（finance_diagnosis scope、roadshows url、shareholder_plans 验证）；新增官方字段字典 `field_dict.py`（T 编码翻译）；InfoCollector 新增 6 个语义化方法（profile/balance_sheet/cashflow/diagnosis/shareholder_plans/roadshows），snapshot 从 8 类扩到 15 类；StockClient.quote 空数据故障转移；FuturesClient._exec 修复
+- **1.0.4** — 修复 `market_stat`（`Quote` dataclass 误用 `.get()`）；50 接口全量实测验证；README 重写加入实测结果表和参数注意事项
+- **1.0.3** — 修复 6 个 InfoClient bug（finance_diagnosis scope、roadshows url、shareholder_plans）；新增官方字段字典 `field_dict.py`；InfoCollector 新增 6 个语义化方法，snapshot 从 8 类扩到 15 类；StockClient.quote 空数据故障转移
 - **1.0.2** — 新增 InfoClient (7615 F10 HTTP 网关)；InfoCollector 结构化采集；topic_compare 数字 ID 修复
 - **1.0.1** — 完整 API 参考文档
 
