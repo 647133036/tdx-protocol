@@ -139,18 +139,22 @@ class InfoClient:
         ]
 
     def roadshows(self, market: int, code: str) -> list[NewsItem]:
-        """路演列表。"""
+        """路演列表。返回含路演详情页链接（url）。market=0 深市, 1 沪市。"""
         resp = _cache_list(market, code, "ly", self.timeout)
-        return [
-            NewsItem(
-                issue_date=r.get("issue_date", ""),
-                title=r.get("title", ""),
-                source=r.get("source", ""),
-                redistime=r.get("redistime", ""),
+        items = []
+        for r in resp.rows:
+            title = r.get("title", "")
+            if not title:
+                continue
+            items.append(NewsItem(
+                issue_date=r.get("start_date", ""),
+                title=title,
+                source=r.get("roadshow_type", ""),
+                redistime=r.get("start_time", ""),
                 rec_id=r.get("rec_id", ""),
-            )
-            for r in resp.rows
-        ]
+                url=r.get("url", ""),
+            ))
+        return items
 
     # ---- 公司资讯 ----
 
@@ -200,11 +204,24 @@ class InfoClient:
     # ---- 财务数据 ----
 
     def finance_report(self, code: str, report_type: str = "zcfzb") -> TqlexResponse:
-        """财务报表。report_type=zcfzb 资产负债表, lrb 利润表, xjllb 现金流量表。"""
+        """财务报表。
+
+        report_type:
+          - ``zcfzb`` 资产负债表（实测：102 行多报告期，字段已可通过 field_dict 翻译）
+          - ``xjllb`` 现金流量表（实测：99 行多报告期，字段已可通过 field_dict 翻译）
+          - ``lrb`` 利润表（实测：端点仅返回表头无数据，7615 网关不支持）
+
+        利润表数据可通过 StockClient.finance() 的语义化字段获取（营业收入/
+        净利润/营业利润等 37 字段）。
+        """
         return _params("CWServ.tdxf10_gg_cwfx", _code6(0, code), report_type, "", timeout=self.timeout)
 
-    def finance_diagnosis(self, code: str, section: str = "yynl", scope: str = "") -> TqlexResponse:
-        """财务诊断。section=yynl 营运能力, chnl 偿还能力, cznl 成长能力, ylnl 盈利能力。"""
+    def finance_diagnosis(self, code: str, section: str = "yynl", scope: str = "0") -> TqlexResponse:
+        """财务诊断。section=yynl 营运能力, cznl 成长能力, ylnl 盈利能力。
+
+        scope 传 '0' 才会返回数据（0 全部报告期, 1 最新, '' 为空）。返回多行：
+        第 1 行个股自身诊断，其余为同行业对比公司。
+        """
         return _params("CWServ.tdxf10_gg_cwzd", section, _code6(0, code), scope, timeout=self.timeout)
 
     def dividend_financing(self, code: str, section: str = "fh") -> TqlexResponse:

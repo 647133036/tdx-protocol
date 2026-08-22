@@ -1,16 +1,25 @@
-"""InfoCollector — 将 8 个已验证的干净 F10 接口统一封装为结构化数据。
+"""InfoCollector — 将 F10 接口统一封装为结构化可读数据。
 
-每个方法返回的 dict 均使用可读字段名（非 T001/T002 编码），数值保真
-（int/float 原样保留，无数据为 None），可直接入库或导出 JSON/CSV。
+每个方法返回的 dict 均使用可读字段名（T/N 编码已通过官方字段字典翻译），
+数值保真（int/float 原样保留，无数据为 None），可直接入库或导出 JSON/CSV。
 
-干净接口清单（均已实测）:
+字段字典来源: 通达信官方「专业财务数据项」编号字典
+  https://help.tdx.com.cn/gspt/docs/markdown/redword/Profinance/profinancedatalist.html
+  规律: finance_report 的 T 编码 = 官方编号 - 1（已用 StockClient.finance() 交叉验证）
+
+可用接口清单:
   news / announcements / research_reports / business_composition /
-  northbound_holding / dividend_financing / topic_ids / stock_score
+  northbound_holding / dividends / topics / score / topic_members /
+  profile / balance_sheet / cashflow / diagnosis / shareholder_plans / roadshows
 """
 
 from __future__ import annotations
 
 from .client import InfoClient
+from .field_dict import (
+    balance_sheet_fields, income_statement_fields, cashflow_fields,
+    profile_fields, translate_row,
+)
 
 
 def news_rows(items: list) -> list[dict]:
@@ -205,6 +214,75 @@ class InfoCollector:
         resp = self.client.stock_score(code)
         return score_rows(resp.rows)
 
+    def balance_sheet(self, code: str) -> list[dict]:
+        """资产负债表 → 可读字段名行（多报告期）。利润表端点无数据，仅返回资产负债表。"""
+        resp = self.client.finance_report(code, "zcfzb")
+        fmap = balance_sheet_fields()
+        return [translate_row(r, fmap) for r in resp.rows]
+
+    def cashflow(self, code: str) -> list[dict]:
+        """现金流量表 → 可读字段名行（多报告期）。"""
+        resp = self.client.finance_report(code, "xjllb")
+        fmap = cashflow_fields()
+        return [translate_row(r, fmap) for r in resp.rows]
+
+    def profile(self, code: str) -> dict:
+        """公司概况 → 可读字段名单行。"""
+        resp = self.client.company_profile(code)
+        rows = resp.rows
+        if not rows:
+            return {}
+        return translate_row(rows[0], profile_fields())
+
+    def diagnosis(self, code: str, section: str = "yynl") -> list[dict]:
+        """财务诊断 → 原始行（N 编码含义随 section 变化，保留原名）。
+
+        section: yynl 营运能力, cznl 成长能力, ylnl 盈利能力。
+        返回多行：第 1 行个股自身，其余为同行业对比公司。
+        """
+        resp = self.client.finance_diagnosis(code, section)
+        return list(resp.rows)
+
+    def shareholder_plans(self, code: str) -> list[dict]:
+        """股东增减持计划 → 可读字段名行。
+
+        原始列: N001=公告日期, N002=变动类型, N003=股东名称, N004=股东身份,
+        N005=拟减持股数, N006=减持比例%, N007=变动金额下限, N008=变动金额上限,
+        N009=起始日, N010=截止日, N011=状态, N012=记录ID。
+        """
+        resp = self.client.shareholder_change_plans(code)
+        out = []
+        for r in resp.rows:
+            out.append({
+                "announce_date": r.get("N001"),
+                "action": r.get("N002"),
+                "shareholder": r.get("N003"),
+                "shareholder_type": r.get("N004"),
+                "planned_shares": r.get("N005"),
+                "planned_pct": r.get("N006"),
+                "amount_min": r.get("N007"),
+                "amount_max": r.get("N008"),
+                "start_date": r.get("N009"),
+                "end_date": r.get("N010"),
+                "status": r.get("N011"),
+                "record_id": r.get("N012"),
+            })
+        return out
+
+    def roadshows(self, market: int, code: str) -> list[dict]:
+        """路演列表 → 结构化行（含详情页链接 url）。"""
+        items = self.client.roadshows(market, code)
+        return [
+            {
+                "title": x.title,
+                "type": x.source,
+                "date": x.issue_date,
+                "time": x.redistime,
+                "url": x.url,
+            }
+            for x in items
+        ]
+
     def topic_members(self, code: str, topic_id: str | None = None,
                       sort_by: str = "zdf") -> list[dict]:
         """题材内成分股排名。topic_id 取数字 ID（topics() 的 topic_id 字段）。"""
@@ -232,7 +310,7 @@ class InfoCollector:
         return rows
 
     def snapshot(self, market: int, code: str) -> dict:
-        """一次调用采集全部 8 类干净数据。"""
+        """一次调用采集全部干净数据。"""
         return {
             "code": code[-6:],
             "news": self.news(market, code),
@@ -243,4 +321,10 @@ class InfoCollector:
             "dividends": self.dividends(code),
             "topics": self.topics(code),
             "score": self.score(code),
+            "profile": self.profile(code),
+            "balance_sheet": self.balance_sheet(code),
+            "cashflow": self.cashflow(code),
+            "diagnosis": self.diagnosis(code),
+            "shareholder_plans": self.shareholder_plans(code),
+            "roadshows": self.roadshows(market, code),
         }

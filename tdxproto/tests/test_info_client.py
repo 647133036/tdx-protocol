@@ -88,3 +88,34 @@ class TestInfoClient:
     def test_error_code_handling(self):
         resp = TqlexResponse(entry="test", error_code=1, result_sets=[], raw={})
         assert not resp.ok
+
+    def test_finance_diagnosis_default_scope_returns_rows(self):
+        data = _make_mock_response("CWServ.tdxf10_gg_cwzd", [
+            {"N000": "贵州茅台", "N001": "酿酒", "N002": "2026中报", "N003": 1},
+        ])
+        with patch("urllib.request.urlopen") as mock:
+            ctx = MagicMock()
+            ctx.read.return_value = data
+            mock.return_value.__enter__.return_value = ctx
+            ic = InfoClient()
+            resp = ic.finance_diagnosis("600519")
+        assert resp.rows[0]["N000"] == "贵州茅台"
+        args = mock.call_args
+        body = json.loads(args.args[0].data.decode("utf-8"))
+        assert body["Params"] == ["yynl", "600519", "0"]
+
+    def test_roadshows_extracts_url(self):
+        data = _make_mock_response("CWSearch.tzx_rcache", [
+            {"title": "业绩说明会", "roadshow_type": "业绩说明会", "start_date": "20260817",
+             "start_time": "15:00", "url": "https://rs.p5w.net/html/1.shtml"},
+        ])
+        with patch("urllib.request.urlopen") as mock:
+            ctx = MagicMock()
+            ctx.read.return_value = data
+            mock.return_value.__enter__.return_value = ctx
+            ic = InfoClient()
+            items = ic.roadshows(0, "000001")
+        assert len(items) == 1
+        assert items[0].title == "业绩说明会"
+        assert items[0].url == "https://rs.p5w.net/html/1.shtml"
+        assert items[0].issue_date == "20260817"

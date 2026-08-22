@@ -140,23 +140,37 @@ for row in finance.rows[:3]:
     print(row)
 ```
 
-**InfoCollector — 结构化采集（推荐）**：8 个已验证的干净接口统一封装，字段用可读名而非 T001/T002 编码，数值保真，可直接入库：
+**InfoCollector — 结构化采集（推荐）**：15 个接口统一封装，T/N 编码已通过官方字段字典翻译为可读中文名，数值保真，可直接入库：
 
 ```python
 from tdxproto import InfoCollector
 
 col = InfoCollector()
-# 一次性采集全部 8 类数据（新闻/公告/研报/主营/北向/分红/题材/评分）
+# 一次性采集全部 15 类数据
 snap = col.snapshot(0, "000001")
 print(f"新闻 {len(snap['news'])} 条, 公告 {len(snap['announcements'])} 条, "
       f"研报 {len(snap['research_reports'])} 条, 分红 {len(snap['dividends'])} 条")
 print(snap["score"][0])          # {"total_score": 2.9, "rank": 13, ...}
+
+# 公司概况（中文可读字段名）
+profile = col.profile("600519")
+print(profile["上市日期"], profile["发行价"], profile["主承销商"])
+
+# 资产负债表 / 现金流量表（T 编码已翻译为标准财务科目名）
+bs = col.balance_sheet("600519")  # [{"rq": "2026-06-30", "货币资金": 535..., "存货": 613..., ...}]
+cf = col.cashflow("600519")       # [{"rq": "2026-06-30", "经营活动产生的现金流量净额": 706..., ...}]
+
+# 股东增减持计划 / 路演（含详情链接）
+plans = col.shareholder_plans("600519")  # [{"action": "拟增持", "amount_max": 33亿, "status": "完成", ...}]
+shows = col.roadshows(0, "000001")       # [{"title": "...", "url": "https://rs.p5w.net/...", ...}]
 
 # 题材内成分股排名（自动用数字题材 ID，需先取 topics）
 topics = col.topics("000001")
 members = col.topic_members("000001", topics[0]["topic_id"])
 print(members[0])                # {"rank": 1, "code": "600577", "change_pct": 10.04, ...}
 ```
+
+字段字典来源：通达信官方「专业财务数据项」编号字典，规律为 `T 编码 = 官方编号 - 1`（资产负债表）和 `T 编码 = 官方编号 - 90`（现金流量表），已用 `StockClient.finance()` 交叉验证。
 
 每个 `snapshot` 中的条目均为结构化的 `dict`，字段含中文语义（如 `holding_pct`、`plan_text`、`pdf_url`），可直接写入数据库或导出 JSON/CSV。
 
@@ -336,7 +350,7 @@ auction = auction_0925(trades)
 | | `topic_compare(code, topic_id, ...)` | 题材内对比排名 |
 | **低层** | `call(entry, body)` | 任意 TQLEX Entry |
 
-`InfoCollector`（推荐用于入库）：`snapshot()` 一次采集 8 类干净数据；`topic_members()` 需传数字题材 ID（来自 `topics()` 的 `topic_id` 字段，传中文名会返回空）。
+`InfoCollector`（推荐用于入库）：`snapshot()` 一次采集 15 类数据；`balance_sheet()`/`cashflow()` 已翻译 T 编码为标准财务科目名；`profile()` 字段全部中文化；`topic_members()` 需传数字题材 ID（来自 `topics()` 的 `topic_id` 字段，传中文名会返回空）。利润表端点无数据，利润数据用 `StockClient.finance()` 获取。
 
 ## 数据模型
 

@@ -96,12 +96,19 @@ class TestCollector:
         ic.dividend_financing.return_value = _mock_response([], [])
         ic.topic_ids.return_value = _mock_response([], [])
         ic.stock_score.return_value = _mock_response([], [])
+        ic.company_profile.return_value = _mock_response([], [])
+        ic.finance_report.return_value = _mock_response([], [])
+        ic.finance_diagnosis.return_value = _mock_response([], [])
+        ic.shareholder_change_plans.return_value = _mock_response([], [])
+        ic.roadshows.return_value = []
         col = InfoCollector(ic)
         snap = col.snapshot(0, "000001")
         assert set(snap.keys()) == {
             "code", "news", "announcements", "research_reports",
             "business_composition", "northbound_holding",
             "dividends", "topics", "score",
+            "profile", "balance_sheet", "cashflow",
+            "diagnosis", "shareholder_plans", "roadshows",
         }
         assert snap["code"] == "000001"
 
