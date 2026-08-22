@@ -1,18 +1,18 @@
 # tdxproto — 通达信全协议解析器
 
-纯 Python 二进制协议实现，零外部依赖。覆盖 7709 A股 + 7727 期货双协议，60+ 命令。
+纯 Python 二进制协议实现，零外部依赖。覆盖 7709 A股 + 7727 期货双协议，自动故障转移。
 
 ## 特性
 
 - **零依赖** — 仅使用 Python 标准库 (`socket`/`struct`/`zlib`)
-- **双协议** — 7709 (A股: 行情/K线/分时/成交/财务/板块/F10) + 7727 (期货/扩展行情)
-- **多数据源** — 巨潮资讯网公告检索 (`cninfo`)
+- **双协议** — 7709 (A股: 行情/K线/分时/成交/财务/板块) + 7727 (期货/扩展行情)
+- **多数据源** — 巨潮资讯网公告检索 (`cninfo`) + 7615 F10 资讯 HTTP 网关 (`info`)
 - **IP 健康监控** — 自动扫描、测速、持久化、故障转移
 - **断线自愈** — 同主机退避重试 + 跨主机故障转移 + 命令失败后 NOP 重连
 - **板块解析** — `.dat` 板块文件本地解析
 - **本地计算** — 复权因子、换手率、除权除息、竞价快照
-- **数据模型** — 17 个 dataclass 统一表示 (Quote/Kline/Minute/Trade/...)
-- **266 个测试** — 单元/组件/系统全覆盖
+- **数据模型** — 14 个 dataclass 统一表示 (Quote/Kline/Minute/Trade/...)
+- **258 个测试** — 单元/组件全覆盖
 
 ## 安装
 
@@ -20,13 +20,6 @@ Python 3.9+，零第三方依赖。
 
 ```bash
 pip install tdxproto
-```
-
-源码使用：
-
-```bash
-git clone https://github.com/647133036/tdx-protocol
-cd tdx-protocol
 ```
 
 ## 快速开始
@@ -44,7 +37,7 @@ with StockClient() as client:
 
     # 实时行情 (五档盘口)
     q = client.quote("sz000001")
-    print(f"平安银行: {q.price}  买一 {q.bid1}  卖一 {q.ask1}")
+    print(f"平安银行: {q.price}  买一 {q.bid_p[0]}  卖一 {q.ask_p[0]}")
 
     # 分时 / 分笔
     minute = client.today_minute("sz000001")
@@ -62,23 +55,48 @@ with StockClient() as client:
 ```python
 from tdxproto import FuturesClient
 
-# 自动发现最优服务器
 with FuturesClient() as fc:
-    # 列出所有市场
-    markets = fc.markets()
-
-    # 中金所沪深300期货
-    bars = fc.kline(47, "IF2608", "day", 0, 10)
-    q = fc.quote(47, "IF2608")
-
     # 自动探测主力合约
     main = fc.get_main_contract("IF", mid=47)
+    print(f"IF主力: {main}")
 
-    # 5 个期货交易所全量代码
-    for mid in [28, 29, 30, 47, 66]:
+    # 实时行情（含持仓量）
+    q = fc.quote(47, main)
+    print(f"price={q.price} vol={q.volume} OI={q.open_interest}")
+
+    # 日K线（含持仓量/结算价）
+    klines = fc.kline(47, main, "day", 0, 5)
+    for k in klines:
+        print(f"{k.time}: O={k.open} H={k.high} C={k.close} pos={k.position}")
+
+    # 1分钟K线
+    k1m = fc.kline(47, main, "1m", 0, 3)
+
+    # 分时（240条，含持仓量）
+    mins = fc.today_minute(47, main)
+
+    # 逐笔成交（含开平性质）
+    trades = fc.today_trade(47, main, 0, 5)
+    for t in trades:
+        print(f"{t.time} {t.price} dir={t.direction} nature={t.nature}")
+
+    # 5个交易所全量合约
+    for mid, name in [(28, "郑商所"), (29, "大商所"), (30, "上期所"),
+                       (47, "中金所"), (66, "广期所")]:
         codes = fc.codes_all(mid)
-        print(f"市场 {mid}: {len(codes)} 个合约")
+        print(f"{name}: {len(codes)} 个合约")
 ```
+
+实测合约行情：
+
+| 交易所 | 合约 | 代码 | 价格 | 持仓量 |
+|--------|------|------|------|--------|
+| 中金所 | IF2608 | `fc.quote(47, "IF2608")` | 4614.8 | 10693 |
+| 中金所 | IC2608 | `fc.quote(47, "IC2608")` | 7834.2 | 87616 |
+| 郑商所 | 苹果2610 | `fc.quote(28, "AP2610")` | 7666.0 | 104422 |
+| 大商所 | 豆一2609 | `fc.quote(29, "A2609")` | 4993.0 | 49776 |
+| 上期所 | 铝合金2609 | `fc.quote(30, "AD2609")` | 22970.0 | 3968 |
+| 广期所 | 碳酸锂2609 | `fc.quote(66, "LC2609")` | 156140.0 | 90982 |
 
 ### 巨潮资讯
 
@@ -91,17 +109,46 @@ for a in anns:
     print(a.title, a.announce_time)
 ```
 
+### F10 资讯 (7615 HTTP)
+
+```python
+from tdxproto import InfoClient
+
+ic = InfoClient()
+# 实时新闻（100条）
+news = ic.news(0, "000001")
+for n in news[:3]:
+    print(f"[{n.issue_date}] {n.title}  ({n.source})")
+
+# 公告（含PDF链接）
+anns = ic.announcements(0, "000001")
+for a in anns[:3]:
+    print(f"[{a.issue_date}] {a.title}  PDF: {a.pdf_url}")
+
+# 研报
+reports = ic.research_reports("000001")
+for r in reports[:3]:
+    print(f"[{r.date}] {r.rating} {r.analyst}: {r.title}")
+
+# 公司概况
+profile = ic.company_profile("000001")
+print(profile.rows[0] if profile.rows else "无数据")
+
+# 财务报表
+finance = ic.finance_report("000001", "zcfzb")
+for row in finance.rows[:3]:
+    print(row)
+```
+
 ### IP 健康监控
 
 ```python
 from tdxproto import get_manager, StockClient
 
-# 查看健康状态
 manager = get_manager()
 best = manager.get_best_stock_host()
 print(f"最优: {best.host} ({best.handshake_latency_ms:.1f}ms)")
 
-# 客户端自动使用优选 IP（默认开启）
 client = StockClient(use_ip_health=True)
 ```
 
@@ -121,16 +168,9 @@ for b in blocks:
 ```python
 from tdxproto import compute_factors, get_equity_at, calc_turnover, auction_0925
 
-# 前复权
 factors = compute_factors(klines, equity_changes, adjust="qfq")
-
-# 指定日期股本
 shares = get_equity_at(equity_changes, "2026-07-01")
-
-# 换手率
 turnover = calc_turnover(volume, shares)
-
-# 09:25 竞价快照
 auction = auction_0925(trades)
 ```
 
@@ -159,11 +199,11 @@ auction = auction_0925(trades)
 | **行情** | `quote(code)` | 实时行情（五档盘口） |
 | | `quotes_detail(code_list)` | 批量详细行情 |
 | | `refresh(codes)` | 增量刷新 |
-| | `quote_list(category, ...)` | 分类行情列表（增强版） |
+| | `quote_list(category, ...)` | 分类行情列表 |
 | **K线** | `kline(code, period, start, count)` | K 线 |
 | | `kline_all(code, period, adjust)` | 全量 K 线（自动翻页 + 复权） |
 | | `chart_sampling(code)` | K 线采样 |
-| | `sparkline(code)` | 迷你走势（基于 1min K 线） |
+| | `sparkline(code)` | 迷你走势 |
 | **分时** | `today_minute(code)` | 今日分时 |
 | | `history_minute(code, date)` | 历史分时 |
 | | `recent_minute(code, date)` | 近期分时 |
@@ -198,11 +238,11 @@ auction = auction_0925(trades)
 | | `get_report_file_raw(filename)` | 完整研报文件下载 |
 | | `get_zhb_files()` | 综合报表文件 (45 个) |
 | | `get_tdx_zs()` | 板块指数配置 (604 个) |
-| | `get_tdx_bk()` | 概念板块简称↔全称 (58 个) |
+| | `get_tdx_bk()` | 概念板块简称全称 (58 个) |
 | | `get_tdx_stat()` | 个股综合统计 (7964 条) |
 | | `get_tdx_stat2()` | 个股资金流向 (7964 条) |
 | | `get_xgsg()` | 新股申购 |
-| | `get_tdx_hy()` | 行业归属: 通达信+申万 (5634 条) |
+| | `get_tdx_hy()` | 行业归属 (5634 条) |
 | **其他** | `server_info()` | 服务器信息 |
 | | `symbol_info(code)` | 标的详细信息 |
 | | `history_orders(code, date)` | 历史委托 |
@@ -218,35 +258,63 @@ auction = auction_0925(trades)
 | | `codes(mid, start, count)` | 品种代码 |
 | | `codes_all(mid)` | 全量品种代码（自动翻页） |
 | | `count()` | 品种总数 |
-| **行情** | `quote(mid, code)` | 实时行情 |
+| **行情** | `quote(mid, code)` | 实时行情（含持仓量/五档） |
 | | `quote_batch(mid, start, count)` | 批量行情 |
 | | `quotes(code_list)` | 批量详细行情 |
-| **K线** | `kline(mid, code, period, start, count)` | K 线 |
+| **K线** | `kline(mid, code, period, start, count)` | K 线（含持仓量/结算价） |
 | | `kline_range(mid, code, period, start, end)` | 区间 K 线 |
 | | `chart_sampling(mid, code)` | K 线采样 |
-| **分时** | `today_minute(mid, code)` | 今日分时 |
+| **分时** | `today_minute(mid, code)` | 今日分时（240条，含持仓量） |
 | | `history_minute(mid, code, date)` | 历史分时 |
 | | `tick_chart(mid, code)` | 分时图 |
 | | `history_tick_chart(mid, code, date)` | 历史分时图 |
-| **成交** | `today_trade(mid, code, start, count)` | 今日成交 |
+| **成交** | `today_trade(mid, code, start, count)` | 今日成交（含开平性质） |
 | | `history_trade(mid, code, date, start, count)` | 历史成交 |
 | **行情表** | `table(start, mode)` | 行情表 |
 | | `table_detail(start)` | 行情明细 |
-| **工具** | `get_main_contract(product, months, mid)` | 主力合约 |
+| **工具** | `get_main_contract(product, months, mid)` | 主力合约自动探测 |
 | | `host()` | 当前连接主机 |
 | | `reconnect()` | 重连 |
 | | `safe_exec(func, *args)` | 安全执行 |
 
-#### 期货市场 ID
+#### 期货市场
 
-| market_id | 名称 | 类别 |
-|-----------|------|------|
-| 28 | 郑州商品 (ZCE) | 商品期货 |
-| 29 | 大连商品 (DCE) | 商品期货 |
-| 30 | 上海期货 (SHFE) | 商品期货 |
-| 47 | 中金所 (CFFEX) | 金融期货 |
-| 66 | 广州期货 (GFEX) | 商品期货 |
-| 4/5/6/7/67 | 商品/金融/股票期权 | 期权 |
+| market_id | 名称 | 合约数 | 实测行情 |
+|-----------|------|--------|----------|
+| 28 | 郑州商品 (ZCE) | 302 | AP2610 苹果: price=7666 OI=104422 |
+| 29 | 大连商品 (DCE) | 328 | A2609 豆一: price=4993 OI=49776 |
+| 30 | 上海期货 (SHFE) | 377 | AD2609 铝合金: price=22970 OI=3968 |
+| 47 | 中金所 (CFFEX) | 89 | IF2608 沪深300: price=4614 OI=10693 |
+| 66 | 广州期货 (GFEX) | 63 | LC2609 碳酸锂: price=156140 OI=90982 |
+| 4/5/6/7/67 | 期权 | — | — |
+
+全部 **1163 个合约** 实测可查。
+
+### F10 资讯 (7615 HTTP) — 17 个方法
+
+| 分类 | 方法 | 说明 |
+|------|------|------|
+| **实时资讯** | `news(market, code)` | 实时新闻（100条） |
+| | `announcements(market, code)` | 公告列表（含PDF链接） |
+| | `roadshows(market, code)` | 路演列表 |
+| **研报** | `research_reports(code, page, size)` | 研报列表（含评级/分析师） |
+| | `company_news(code, section, ...)` | 公司资讯 |
+| **概况** | `stock_info(code)` | 股票基础信息 |
+| | `company_profile(code, section)` | 公司概况（发行上市） |
+| | `business_periods(code)` | 主营构成可选报告期 |
+| | `business_composition(code, date)` | 主营构成 |
+| **财务** | `finance_report(code, type)` | 财务报表（资产负债/利润/现金流） |
+| | `finance_diagnosis(code, section)` | 财务诊断（营运/偿还/成长/盈利） |
+| | `dividend_financing(code, section)` | 分红融资 |
+| **评分** | `stock_score(code, section)` | 个股总评 |
+| | `profit_forecast(code)` | 盈利预测 |
+| **股东** | `shareholder_change_plans(code, ...)` | 股东增减持计划 |
+| | `northbound_holding(code, ...)` | 沪深股通持股 |
+| | `governance(code, section)` | 资本运作治理 |
+| **题材** | `hot_topics(code, section)` | 热点题材 |
+| | `topic_ids(code)` | 题材 ID 列表 |
+| | `topic_compare(code, topic_id, ...)` | 题材内对比排名 |
+| **低层** | `call(entry, body)` | 任意 TQLEX Entry |
 
 ## 数据模型
 
@@ -274,7 +342,7 @@ tdxproto/
 ├── tube.py           # 协议无关 TCP 传输管道（连接池/心跳/故障转移）
 ├── frame.py          # 二进制帧编解码
 ├── codec.py          # Varint/价格/日期/成交量/代码标准化
-├── models.py         # 17 个数据模型 dataclass
+├── models.py         # 14 个数据模型 dataclass
 ├── compute.py        # 本地计算引擎（复权因子/换手率/除权除息/竞价快照）
 ├── scanner.py        # 主站可用性探测与测速（TCP + 协议握手）
 ├── hosts.py          # 主站地址表（A 股 78 个, 期货 17 个）
@@ -294,11 +362,14 @@ tdxproto/
 ├── cninfo/           # 巨潮资讯网
 │   ├── client.py     # CninfoClient（公告检索）
 │   └── models.py     # Announcement / CninfoError
+├── info/             # 7615 F10 资讯 HTTP 网关
+│   ├── client.py     # InfoClient（新闻/公告/研报/财务/概况/题材）
+│   └── models.py     # 响应模型
 ├── mac/              # MAC 协议
 │   ├── client.py     # MacClient（板块/成分股/排行）
 │   ├── commands.py   # 命令 + 枚举
 │   └── frame.py      # MAC 帧编解码
-└── tests/            # 266 个测试用例
+└── tests/            # 258 个测试用例
 ```
 
 ## 协议说明
@@ -318,34 +389,30 @@ tdxproto/
 - **帧格式**: `<BIBHHH` (prefix, msg_id, ctrl, data_len, data_len, cmd)
 - **心跳**: 定期发送 `0x23F0` 维持连接
 - **动态主机**: 连接前扫描 17 个服务器，按延迟排序，失败 3 次自动轮换
+- **实测数据**: 5 个交易所共 1163 个合约，行情/日K/1分钟K/分时/逐笔成交全部可用
 
 ### MAC 协议
 
-- **帧格式**: `0x1C` 头 + msg_id + body
-- 当前公网无可用 MAC 服务器，`MacClient` 保留供后续使用
+- **帧格式**: 请求头 `0x1C` + msg_id + body；响应头 `0xB1`
+- 支持板块列表、成分股报价、个股所属板块、资金流向、板块汇总、涨跌排行、服务器信息、个股详情
+- `MacClient` 连接 7709 端口，握手复用 StockClient 的 SetupCmd1/2/3
+- `StockClient` 自动代理板块相关方法到 `MacClient`
 
 ## 测试
 
 ```bash
-# 运行全部测试
 python -m pytest tdxproto/tests/ -v
-
-# 仅运行单元/组件测试
 python -m pytest tdxproto/tests/ -v -m "not system"
-
-# 运行系统测试（需连接真实服务器）
-python -m pytest tdxproto/tests/ -v -m system
 ```
 
-测试覆盖：258 passed, 8 skipped（期货系统测试需 7727 端口可达）。
+测试覆盖：258 passed, 8 skipped（系统测试需连接真实服务器）。
 
 ## 性能
 
 - 单次行情查询: 10-50ms
 - 全量 K 线翻页 (8000+ 条): 1-3s
 - 全市场代码扫描 (27000+ 只): 2-5s
-- 期货全市场扫描 (5 个交易所, 1160+ 合约): 10-20s
-- 零额外内存分配，所有数据模型复用
+- 期货全市场扫描 (5 个交易所, 1163 个合约): 10-20s
 
 ## License
 

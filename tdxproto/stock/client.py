@@ -15,7 +15,7 @@ from datetime import date, timedelta
 from typing import Optional, Sequence
 
 from ..codec import split_code, decode_volume, get_price, u32, int_date, normalize_code
-from ..models import EquityChange, Kline, Minute, Trade
+from ..models import EquityChange, Kline, Minute, Trade, Quote
 from ..ip_health import get_manager, HostManager
 from .._reconnect import RETRY_DELAYS, select_best_host, find_working_host
 from ..scanner import scan_stock
@@ -406,16 +406,35 @@ class StockClient:
                 break
         return self._name_map.get(key, "")
 
-    def quote(self, code: str):
-        """获取实时行情（含名称）."""
+    def quote(self, code: str) -> Quote:
+        """获取实时行情（含名称）。"""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
         data = self._quote_send_recv(_b_snapshot(mid, num))
         result = _p_snapshot(data, coefficient=coeff)
-        quote_data = result[0] if result else {}
-        if quote_data and "name" not in quote_data:
-            quote_data["name"] = self._get_name(code)
-        return quote_data
+        if not result:
+            return Quote(code=code)
+        q = result[0]
+        if "name" not in q:
+            q["name"] = self._get_name(code)
+        return Quote(
+            code=q.get("code", code),
+            market=str(q.get("market", mid)),
+            name=q.get("name", ""),
+            price=q.get("price", 0.0),
+            pre_close=q.get("last_close", 0.0),
+            open=q.get("open", 0.0),
+            high=q.get("high", 0.0),
+            low=q.get("low", 0.0),
+            volume=int(q.get("vol", 0)),
+            amount=q.get("amount", 0.0),
+            bid_p=[q.get(f"bid{i}", 0.0) for i in range(1, 6)],
+            bid_v=[int(q.get(f"bid_vol{i}", 0)) for i in range(1, 6)],
+            ask_p=[q.get(f"ask{i}", 0.0) for i in range(1, 6)],
+            ask_v=[int(q.get(f"ask_vol{i}", 0)) for i in range(1, 6)],
+            inner_vol=int(q.get("s_vol", 0)),
+            outer_vol=int(q.get("b_vol", 0)),
+        )
 
     def _format_kline_time(self, r: dict, period: str) -> str:
         y = r.get('year', 0)

@@ -28,6 +28,7 @@ from .compute import compute_factors, get_equity_at, calc_turnover, parse_xdxr, 
 from .stock import StockClient
 from .futures import FuturesClient
 from .cninfo import CninfoClient, Announcement, CninfoError
+from .info import InfoClient
 from .scanner import (
     scan_stock, scan_futures, ProbeResult,
     DEFAULT_TIMEOUT, DEFAULT_WORKERS,
@@ -41,6 +42,7 @@ from .block_reader import parse_block_dat
 from .gbbq import GbbqManager, get_gbbq_manager
 from .workday import WorkdayManager, get_workday_manager
 from .block_bridge import BlockBridge, get_block_bridge
+from .ip_health import get_manager
 try:
     from .mac.client import MacClient
     from .mac.commands import BoardType, SortColumn, SortOrder, FieldBit, Category, FilterType
@@ -48,9 +50,10 @@ try:
 except ImportError:
     _HAS_MAC = False
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __all__ = [
     "StockClient", "FuturesClient", "MacClient",
+    "InfoClient",
     "CninfoClient", "Announcement", "CninfoError",
     "Quote", "Kline", "Minute", "Trade",
     "EquityChange", "FinanceInfo", "PriceLimit",
@@ -68,6 +71,7 @@ __all__ = [
     "GbbqManager", "get_gbbq_manager",
     "WorkdayManager", "get_workday_manager",
     "BlockBridge", "get_block_bridge",
+    "get_manager",
     "BoardType", "SortColumn", "SortOrder", "FieldBit",
     "Category", "FilterType",
 ]

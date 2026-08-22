@@ -206,6 +206,8 @@ def _convert_board_code(board_code: str | int) -> int:
         return int(code_str) - 899000 + 32000
     if code_str.startswith("880") and len(code_str) == 6:
         return int(code_str) - 880000 + 20000
+    if code_str.startswith("881") and len(code_str) == 6:
+        return int(code_str) - 880000 + 20000
     return int(code_str)
 
 
@@ -226,22 +228,23 @@ def _b_board_list(page_size: int = 150, board_type: int = BoardType.ALL,
 def _p_board_list(data: bytes) -> list[dict]:
     """解析板块列表响应.
 
-    前 4 字节: count_all(H) + total(H)
-    之后每 160 字节一条记录.
+    前 4 字节: data_len(H) + data_len(H)
+    之后每 160 字节一条记录:
+      market(H) + unknown(I) + code(6s) + pad(12s) + name(44s) + price(f) + rise_speed(f) + pre_close(f)
+      + symbol_market(H) + unknown(I) + symbol_code(6s) + pad(12s) + symbol_name(44s) + 3f
     """
     if len(data) < 4:
         return []
-    count_all, total = struct.unpack("<HH", data[:4])
-    count = count_all // 2
+    count = (len(data) - 4) // 160
     results = []
     pos = 4
     for _ in range(count):
         if len(data) < pos + 160:
             break
-        market, code_b, name_b, price, rise_speed, pre_close, \
-            symbol_market, symbol_code_b, symbol_name_b, \
+        market, _unk1, code_b, _pad1, name_b, price, rise_speed, pre_close, \
+            symbol_market, _unk2, symbol_code_b, _pad2, symbol_name_b, \
             symbol_price, symbol_rise_speed, symbol_pre_close = \
-            struct.unpack_from("<H6s16s44sfffH6s16s44sfff", data, pos)
+            struct.unpack_from("<HI6s12s44sfffHI6s12s44sfff", data, pos)
         results.append({
             "market": market,
             "code": code_b.decode("gbk", errors="replace").strip("\x00"),
@@ -254,7 +257,7 @@ def _p_board_list(data: bytes) -> list[dict]:
             "symbol_name": symbol_name_b.decode("gbk", errors="replace").strip("\x00"),
             "symbol_price": round(symbol_price, 3),
             "symbol_rise_speed": round(symbol_rise_speed, 2),
-            "total": total,
+            "symbol_pre_close": round(symbol_pre_close, 3),
         })
         pos += 160
     return results
@@ -313,15 +316,26 @@ def _b_board_members_quotes(board_code: str | int, page_size: int = 80,
     return part1 + bitmap_bytes + control_bytes
 
 
+_INT_FIELD_BITS = {
+    FieldBit.VOL,
+    FieldBit.RISE_SPEED,
+    FieldBit.UP_COUNT,
+    FieldBit.DOWN_COUNT,
+    FieldBit.FLAT_COUNT,
+    FieldBit.TURNOVER_RATE,
+    FieldBit.SERVER_TIME,
+}
+
+
 def _p_board_members_quotes(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """解析板块成分股响应."""
-    if len(data) < 20:
+    if len(data) < 30:
         return []
 
-    resp_bitmap = data[:16]
+    resp_bitmap = data[4:20]
     active_fields = get_active_fields(resp_bitmap)
 
-    pos = 20
+    pos = 24
     if pos >= len(data):
         return []
     total, row_count = struct.unpack_from("<IH", data, pos)
@@ -338,13 +352,16 @@ def _p_board_members_quotes(data: bytes, coefficient: float = 0.01) -> list[dict
 
         row_data = {"market": market, "code": code, "name": name}
         field_values = []
-        for _ in range(len(active_fields)):
+        for field_bit in active_fields:
             if pos + 4 <= len(data):
-                val = struct.unpack_from("<f", data, pos)[0]
+                if field_bit in _INT_FIELD_BITS:
+                    val = struct.unpack_from("<I", data, pos)[0]
+                else:
+                    val = struct.unpack_from("<f", data, pos)[0]
                 field_values.append(val)
                 pos += 4
             else:
-                field_values.append(0.0)
+                field_values.append(0)
 
         for i, field_bit in enumerate(active_fields):
             if i < len(field_values):
@@ -372,7 +389,11 @@ def _p_board_members_quotes(data: bytes, coefficient: float = 0.01) -> list[dict
                     FieldBit.SERVER_TIME: "server_time",
                 }
                 key = name_map.get(field_bit, f"field_{field_bit}")
-                row_data[key] = round(field_values[i], 3) if isinstance(field_values[i], float) else field_values[i]
+                val = field_values[i]
+                if isinstance(val, float):
+                    row_data[key] = round(val, 3)
+                else:
+                    row_data[key] = val
 
         results.append(row_data)
 
@@ -399,12 +420,12 @@ def _b_stock_blocks(market: int, code: str) -> bytes:
 def _p_stock_blocks(data: bytes) -> list[dict]:
     """解析个股所属板块响应.
 
-    前 27 字节头，之后是 JSON 数组（GBK 编码）.
+    响应头约 32 字节，之后是 JSON 数组（GBK 编码）.
     """
-    if len(data) < 27:
+    json_start = data.find(b"[")
+    if json_start < 0:
         return []
 
-    json_start = 27
     json_raw = data[json_start:]
     try:
         json_str = json_raw.decode("gbk", errors="replace")
@@ -421,14 +442,31 @@ def _p_stock_blocks(data: bytes) -> list[dict]:
     for item in items:
         if not isinstance(item, (list, tuple)) or len(item) < 4:
             continue
-        results.append({
-            "board_type": item[0],
-            "market": item[1],
+        try:
+            bt = int(item[0])
+        except (ValueError, TypeError):
+            bt = item[0]
+        try:
+            mk = int(item[1])
+        except (ValueError, TypeError):
+            mk = item[1]
+        row = {
+            "board_type": bt,
+            "market": mk,
             "board_code": str(item[2]),
-            "board_name": str(item[3]) if len(item) > 3 else "",
-            "close": item[4] if len(item) > 4 else 0.0,
-            "pre_close": item[5] if len(item) > 5 else 0.0,
-        })
+            "board_name": str(item[3]),
+        }
+        if len(item) > 4:
+            try:
+                row["close"] = float(item[4])
+            except (ValueError, TypeError):
+                pass
+        if len(item) > 5:
+            try:
+                row["pre_close"] = float(item[5])
+            except (ValueError, TypeError):
+                pass
+        results.append(row)
     return results
 
 
@@ -440,7 +478,8 @@ def _b_board_summary(board_code: str | int, fields: set[int] | None = None) -> b
     """构建板块汇总请求（复用成分股接口，获取全量成分股后聚合）."""
     if fields is None:
         fields = {
-            FieldBit.PRICE, FieldBit.CLOSE, FieldBit.AMOUNT,
+            FieldBit.PRICE, FieldBit.CLOSE, FieldBit.PRE_CLOSE,
+            FieldBit.VOL, FieldBit.AMOUNT,
             FieldBit.RISE_SPEED, FieldBit.MAIN_NET_AMOUNT,
             FieldBit.UP_COUNT, FieldBit.DOWN_COUNT,
         }
@@ -612,12 +651,12 @@ def _b_capital_flow(market: int, code: str) -> bytes:
 def _p_capital_flow(data: bytes) -> dict:
     """解析资金流向响应.
 
-    前 27 字节头，之后是 JSON 数组（GBK 编码）.
+    响应头约 32 字节，之后是 JSON 数组（GBK 编码）.
     """
-    if len(data) < 27:
+    json_start = data.find(b"[")
+    if json_start < 0:
         return {}
 
-    json_start = 27
     json_raw = data[json_start:]
     try:
         json_str = json_raw.decode("gbk", errors="replace")
@@ -676,26 +715,29 @@ def _p_server_info(data: bytes) -> dict:
         return {}
 
     count, = struct.unpack_from("<H", data, 0)
-    pos = 22  # skip flags(8) + tag(3) + reserved(9)
-    today_date, ts1, sessions_1_raw, sessions_2_raw, flag, \
-        last_trading_day, ts2, market_param_1, market_param_2 = \
-        struct.unpack_from("<II8H8HBII", data, pos)
+    pos = 26
+    today_date, ts1 = struct.unpack_from("<II", data, pos)
+    sessions_1_raw = struct.unpack_from("<8H", data, pos + 8)
+    sessions_2_raw = struct.unpack_from("<8H", data, pos + 24)
+    flag, = struct.unpack_from("<B", data, pos + 40)
+    last_trading_day, ts2, market_param_1, market_param_2 = \
+        struct.unpack_from("<IIII", data, pos + 41)
 
     sessions_1 = []
     for i in range(4):
         open_min = sessions_1_raw[i * 2]
         close_min = sessions_1_raw[i * 2 + 1]
-        sessions_1.append((open_min // 60, open_min % 60))
-        if open_min == 0 and close_min == 0:
-            sessions_1.pop()
+        if open_min == close_min:
+            break
+        sessions_1.append((open_min, close_min))
 
     sessions_2 = []
     for i in range(4):
         open_min = sessions_2_raw[i * 2]
         close_min = sessions_2_raw[i * 2 + 1]
-        sessions_2.append((open_min // 60, open_min % 60))
-        if open_min == 0 and close_min == 0:
-            sessions_2.pop()
+        if open_min == close_min:
+            break
+        sessions_2.append((open_min, close_min))
 
     def _format_time(minutes: int) -> str:
         h = minutes // 60
@@ -737,7 +779,8 @@ def _b_symbol_info(market: int, code: str) -> bytes:
 def _p_symbol_info(data: bytes) -> dict:
     """解析个股详细信息响应.
 
-    核心字段偏移 96，额外字段偏移 148.
+    响应头 8B, market+code+name 从 offset 8 (68B),
+    行情数据从 offset 96 (56B), 额外字段从 offset 152.
     """
     if len(data) < 158:
         return {}
@@ -746,11 +789,11 @@ def _p_symbol_info(data: bytes) -> dict:
     code = code_b.decode("gbk", errors="replace").strip("\x00")
     name = name_b.decode("gbk", errors="replace").strip("\x00")
 
-    date_raw, time_raw, activity, pre_close, open_, high, low, \
+    _raw, date_raw, time_raw, activity, pre_close, open_, high, low, \
         close, momentum, vol, amount, inside_vol, outside_vol = \
-        struct.unpack_from("<IIIffIfIIfff", data, 96)
+        struct.unpack_from("<IIIIffffffIIII", data, 96)
 
-    _, turnover, avg_price = struct.unpack_from("<HIf", data, 148)
+    _, turnover, avg_price = struct.unpack_from("<HIf", data, 152)
 
     def _parse_dt(date_raw: int, time_raw: int) -> tuple[str, str]:
         dt_str = f"{date_raw // 10000:04d}-{(date_raw % 10000) // 100:02d}-{date_raw % 100:02d}"
@@ -773,9 +816,9 @@ def _p_symbol_info(data: bytes) -> dict:
         "close": round(close, 3),
         "momentum": round(momentum, 3),
         "volume": vol,
-        "amount": round(amount, 2),
+        "amount": amount,
         "inside_volume": inside_vol,
         "outside_volume": outside_vol,
-        "turnover": round(turnover, 2),
+        "turnover": turnover,
         "avg_price": round(avg_price, 3),
     }

@@ -8,18 +8,20 @@ from typing import Optional
 from .._reconnect import RETRY_DELAYS
 from ..hosts import MAC_HOSTS
 from ..mac.frame import build_mac_frame, parse_mac_response
+from ..stock.commands import setup_cmd1, setup_cmd2, setup_cmd3
 from ..mac.commands import (
     _b_board_list, _p_board_list,
     _b_board_members_quotes, _p_board_members_quotes,
     _b_stock_blocks, _p_stock_blocks,
     _b_board_summary, _p_board_summary,
-    _b_board_change_ranking, _p_board_change_ranking,
     _b_category_quotes, _p_category_quotes,
     _b_capital_flow, _p_capital_flow,
     _b_server_info, _p_server_info,
     _b_symbol_info, _p_symbol_info,
-    Category, FilterType,
+    Category, FilterType, SortOrder,
 )
+
+_MAC_RESP_FLAGS = (0x1C, 0xB1)
 
 
 class MacClient:
@@ -30,7 +32,7 @@ class MacClient:
         self.timeout = timeout
         self.sock: Optional[socket.socket] = None
         self._lock = threading.Lock()
-        self._msg_id = 0
+        self._current_host: Optional[str] = None
 
     def __enter__(self):
         self.connect()
@@ -42,22 +44,17 @@ class MacClient:
     def connect(self):
         """连接到最佳 MAC 主机."""
         for host_str in self.hosts:
+            sock = None
             try:
                 host, port = host_str.rsplit(":", 1)
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(self.timeout)
                 sock.connect((host, int(port)))
-                # 发送握手命令（与标准协议相同）
-                sock.send(b"\x0c\x02\x18\x93\x00\x01\x03\x00\x03\x00\x0d\x00\x01")
+                sock.send(setup_cmd1())
                 self._recv_pass(sock)
-                sock.send(b"\x0c\x02\x18\x94\x00\x01\x03\x00\x03\x00\x0d\x00\x02")
+                sock.send(setup_cmd2())
                 self._recv_pass(sock)
-                sock.send(
-                    b"\x0c\x03\x18\x99\x00\x01\x20\x00\x20\x00\xdb\x0f"
-                    b"\xd5\xd0\xc9\xcc\xd6\xa4\xa8\x00\x00\x00\x8f\xc2\x25"
-                    b"\x40\x13\x00\x00\xd5\x00\xc9\xcc\xbd\xf0\xd7\xea"
-                    b"\x00\x00\x00\x02"
-                )
+                sock.send(setup_cmd3())
                 self._recv_pass(sock)
                 self.sock = sock
                 self._current_host = host_str
@@ -72,38 +69,47 @@ class MacClient:
             self.sock.close()
             self.sock = None
 
-    def _next_msg_id(self) -> int:
-        self._msg_id += 1
-        return self._msg_id
-
-    def _send_recv_mac(self, body: bytes) -> bytes:
+    def _send_recv_mac(self, cmd: int, body: bytes, ctrl: int = 1) -> bytes:
         """发送 MAC 请求并接收响应."""
         if not self.sock:
             raise ConnectionError("not connected")
-        msg_id = self._next_msg_id()
-        frame = build_mac_frame(msg_id, body)
-        self.sock.send(frame)
-        raw = self._recv_response()
+        frame = build_mac_frame(cmd, body, ctrl=ctrl)
+        with self._lock:
+            self.sock.send(frame)
+            raw = self._recv_response()
         _, response_body = parse_mac_response(raw)
         return response_body
 
     def _recv_response(self) -> bytes:
-        """接收 MAC 响应帧."""
+        """接收 MAC 响应帧.
+
+        响应的 data_len 字段为 0，无法预知 body 长度。
+        先读 12 字节头+cmd，再以短超时读取剩余 body。
+        """
         buf = bytearray()
         while len(buf) < 12:
-            chunk = self.sock.recv(12 - len(buf))
+            chunk = self.sock.recv(8192)
             if not chunk:
                 raise ConnectionError("connection lost")
             buf.extend(chunk)
-        head_flag, _, _, body_len = struct.unpack_from("<BIBH", buf, 0)
-        if head_flag != 0x1C:
+
+        head_flag = buf[0]
+        if head_flag not in _MAC_RESP_FLAGS:
             raise ValueError(f"not a mac frame: head_flag={head_flag:#x}")
-        total = 12 + body_len
-        while len(buf) < total:
-            chunk = self.sock.recv(min(65536, total - len(buf)))
-            if not chunk:
-                raise ConnectionError("connection lost")
-            buf.extend(chunk)
+
+        orig_timeout = self.sock.gettimeout()
+        self.sock.settimeout(1.0)
+        try:
+            while True:
+                try:
+                    chunk = self.sock.recv(8192)
+                    if not chunk:
+                        break
+                    buf.extend(chunk)
+                except socket.timeout:
+                    break
+        finally:
+            self.sock.settimeout(orig_timeout)
         return bytes(buf)
 
     def _recv_pass(self, s: socket.socket):
@@ -137,7 +143,7 @@ class MacClient:
     ) -> list[dict]:
         """获取板块列表."""
         body = _b_board_list(page_size, board_type, sort_column, sort_order, start)
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x1231, body)
         return _p_board_list(raw)
 
     def board_members(
@@ -150,19 +156,19 @@ class MacClient:
     ) -> list[dict]:
         """获取板块成分股."""
         body = _b_board_members_quotes(board_code, page_size, start, sort_type, sort_order)
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x122C, body)
         return _p_board_members_quotes(raw)
 
     def stock_blocks(self, market: int, code: str) -> list[dict]:
         """获取个股所属板块."""
         body = _b_stock_blocks(market, code)
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x1218, body, ctrl=1)
         return _p_stock_blocks(raw)
 
     def board_summary(self, board_code: str | int) -> dict:
         """获取板块汇总（成交额/主力净流入/涨跌家数）."""
         body = _b_board_summary(board_code)
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x122C, body)
         return _p_board_summary(raw)
 
     def board_change_ranking(
@@ -172,10 +178,26 @@ class MacClient:
         top_n: int = 100,
         sort_order: int = 1,
     ) -> list[dict]:
-        """获取板块 N 日涨跌幅排行."""
-        body = _b_board_change_ranking(board_type, days, sort_order, top_n)
-        raw = self._send_recv_mac(body)
-        return _p_board_change_ranking(raw)
+        """获取板块涨跌幅排行.
+
+        通过 board_list 获取板块数据后客户端排序，
+        按 rise_speed（涨跌幅）排序返回 top_n 条.
+        """
+        boards = self.board_list(
+            page_size=300,
+            board_type=board_type,
+            sort_column=3,
+            sort_order=sort_order,
+        )
+        if not boards:
+            return []
+        for b in boards:
+            b["change_pct"] = b.get("rise_speed", 0)
+        boards.sort(
+            key=lambda x: x.get("change_pct", 0),
+            reverse=(sort_order == SortOrder.DESC),
+        )
+        return boards[:top_n]
 
     def category_quotes(
         self,
@@ -192,23 +214,23 @@ class MacClient:
         exclude_flags: FilterType 组合（如 FilterType.ST | FilterType.NEW）
         """
         body = _b_category_quotes(category, page_size, start, sort_type, sort_order, exclude_flags)
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x122C, body)
         return _p_category_quotes(raw)
 
     def capital_flow(self, market: int, code: str) -> dict:
         """个股资金流向（capital-flow）."""
         body = _b_capital_flow(market, code)
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x1218, body, ctrl=2)
         return _p_capital_flow(raw)
 
     def server_info(self) -> dict:
         """服务器信息（server-info）."""
         body = _b_server_info()
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x120F, body)
         return _p_server_info(raw)
 
     def symbol_info(self, market: int, code: str) -> dict:
         """个股详细信息（symbol-info）."""
         body = _b_symbol_info(market, code)
-        raw = self._send_recv_mac(body)
+        raw = self._send_recv_mac(0x122A, body)
         return _p_symbol_info(raw)

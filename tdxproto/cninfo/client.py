@@ -343,3 +343,7 @@ class CninfoClient:
         except Exception as e:
             raise CninfoError(f"PDF 下载失败: {e}") from e
         return str(path.resolve())
+
+    def search(self, code: str, **kwargs) -> list[dict]:
+        """公告检索（``get_announcements`` 的简写别名）."""
+        return self.get_announcements(code, **kwargs)
