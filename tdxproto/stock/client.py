@@ -353,6 +353,29 @@ class StockClient:
         except (ConnectionError, TimeoutError, OSError, zlib.error):
             return b"\x00\x00"
 
+    def _send_recv_quick(self, pkg: bytes, timeout: float = 2.0) -> bytes:
+        """快速发送接收，短超时，服务器无响应时立即返回空字节.
+
+        适用于已知服务器不支持的命令（如 vol_profile/index_momentum/index_info），
+        避免触发完整的重试+故障转移链（40s+）。
+        """
+        with self._lock:
+            if not self.sock:
+                self.connect()
+            self._throttle()
+            try:
+                orig = self.sock.gettimeout()
+                self.sock.settimeout(timeout)
+                try:
+                    self.sock.send(pkg)
+                    return self._recv_response(self.sock)
+                finally:
+                    if self.sock:
+                        self.sock.settimeout(orig)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError,
+                    OSError, TimeoutError, ConnectionError):
+                return b"\x00\x00"
+
     # ---- 名称缓存 ----
 
     def count(self, market: int) -> int:
@@ -836,21 +859,25 @@ class StockClient:
         """分时成交量分布."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
-        data = self._send_recv(_b_vol_profile(mid, num))
+        data = self._send_recv_quick(_b_vol_profile(mid, num))
+        if len(data) < 11:
+            return {}
         return _p_vol_profile(data, coefficient=coeff)
 
     def index_momentum(self, code: str):
         """指数动能."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
-        data = self._send_recv(_b_index_momentum(mid, num))
+        data = self._send_recv_quick(_b_index_momentum(mid, num))
         return _p_index_momentum(data, coefficient=coeff)
 
     def index_info(self, code: str) -> dict:
         """指数成分股/行情."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
-        data = self._send_recv(_b_index_info(mid, num))
+        data = self._send_recv_quick(_b_index_info(mid, num))
+        if len(data) < 13:
+            return {}
         return _p_index_info(data, coefficient=coeff)
 
     def quotes_detail(self, code_list) -> dict:
@@ -890,7 +917,7 @@ class StockClient:
 
     def unusual(self, market: int = 0, start: int = 0, count: int = 600):
         """主力监控."""
-        data = self._quote_safe_send_recv(_b_unusual(market, start, count))
+        data = self._send_recv_quick(_b_unusual(market, start, count))
         return _p_unusual(data)
 
     def chart_sampling(self, code: str):

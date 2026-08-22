@@ -2,7 +2,7 @@
 
 纯 Python 二进制协议实现，零外部依赖。覆盖 7709 A股 + 7727 期货双协议，7615 F10 资讯 HTTP 网关，自动故障转移。
 
-版本 **1.0.4**
+版本 **1.0.5**
 
 ## 特性
 
@@ -16,14 +16,14 @@
 - **本地计算** — 复权因子、换手率、除权除息、竞价快照
 - **数据模型** — 14 个 dataclass 统一表示 (Quote/Kline/Minute/Trade/...)
 - **276 个测试** — 单元/组件全覆盖
-- **50 个接口实测** — A股 24 + 期货 10 + F10 16，全部可用（v1.0.4）
+- **50 个接口实测** — A股 24 + 期货 10 + F10 16，全部可用（v1.0.5）
 
 ## 安装
 
 Python 3.9+，零第三方依赖。当前版本通过 GitHub 安装：
 
 ```bash
-pip install git+https://github.com/647133036/tdx-protocol.git@v1.0.4
+pip install git+https://github.com/647133036/tdx-protocol.git@v1.0.5
 ```
 
 ## 快速开始
@@ -518,6 +518,7 @@ python -m pytest tdxproto/tests/ -v -m "not system"
 
 ## 变更记录
 
+- **1.0.5** — 修复 4 个命令超时卡死（vol_profile/index_momentum/index_info/unusual）；新增 `_send_recv_quick` 短超时机制
 - **1.0.4** — 修复 `market_stat`（`Quote` dataclass 误用 `.get()`）；50 接口全量实测验证；README 重写加入实测结果表和参数注意事项
 - **1.0.3** — 修复 6 个 InfoClient bug（finance_diagnosis scope、roadshows url、shareholder_plans）；新增官方字段字典 `field_dict.py`；InfoCollector 新增 6 个语义化方法，snapshot 从 8 类扩到 15 类；StockClient.quote 空数据故障转移
 - **1.0.2** — 新增 InfoClient (7615 F10 HTTP 网关)；InfoCollector 结构化采集；topic_compare 数字 ID 修复
