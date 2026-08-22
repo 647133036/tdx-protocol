@@ -748,7 +748,7 @@ class StockClient:
 
     def report_file(self, filename: str, offset: int = 0) -> dict:
         """下载财务报表文件."""
-        data = self._send_recv(_b_report_file(filename, offset))
+        data = self._send_recv_quick(_b_report_file(filename, offset), timeout=15)
         return _p_report_file(data)
 
     def get_report_file_raw(self, filename: str) -> bytes:
@@ -834,7 +834,7 @@ class StockClient:
 
     def _get_zhb_file(self, name: str) -> bytes:
         """从 zhb.zip 缓存中获取指定文件内容."""
-        if not hasattr(self, "_zhb_cache"):
+        if not hasattr(self, "_zhb_cache") or not self._zhb_cache:
             self._zhb_cache = self.get_zhb_files()
         return self._zhb_cache.get(name, b"")
 
@@ -992,18 +992,24 @@ class StockClient:
             pass
         return results
 
-    def chart_sampling(self, code: str):
-        """K线采样."""
+    def chart_sampling(self, code: str) -> list[float]:
+        """K线采样（服务器多不支持此命令，回退用 kline 收盘价）."""
         mid, _, num = split_code(code)
-        data = self._safe_send_recv(_b_chart_sampling_kline(mid, num))
-        return _p_chart_sampling_kline(data)
+        data = self._send_recv_quick(_b_chart_sampling_kline(mid, num), timeout=15)
+        result = _p_chart_sampling_kline(data)
+        if result:
+            return result
+        klines = self.kline(code, period="day", count=100)
+        if klines:
+            return [k.close for k in klines]
+        return []
 
     def history_orders(self, code: str, tdate):
-        """历史委托."""
+        """历史委托（服务器多不支持此命令，可能返回空）."""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
         d = self._parse_tdate(tdate)
-        data = self._safe_send_recv(_b_history_orders_full(mid, num, d))
+        data = self._send_recv_quick(_b_history_orders_full(mid, num, d), timeout=15)
         return _p_history_orders(data, coefficient=coeff)
 
     def refresh(self, codes: list[str]) -> list[dict]:
