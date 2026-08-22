@@ -187,9 +187,11 @@ class FuturesClient:
         return self._current_host_entry
 
     def _exec(self, cmd: int, payload: bytes, _retry: int = 0):
+        if self._tube is None:
+            self._connect()
         try:
             return self._tube.call(cmd, payload, PREFIX)
-        except TubeError as e:
+        except (TubeError, AttributeError) as e:
             self._mark_host_failed(self._tube.host if self._tube else None)
             if _retry >= 1:
                 raise

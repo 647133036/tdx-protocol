@@ -413,6 +413,8 @@ class StockClient:
         data = self._quote_send_recv(_b_snapshot(mid, num))
         result = _p_snapshot(data, coefficient=coeff)
         if not result:
+            result = self._find_host_returning_snapshot(mid, num, coeff)
+        if not result:
             return Quote(code=code)
         q = result[0]
         if "name" not in q:
@@ -472,8 +474,38 @@ class StockClient:
                 rows = self._find_host_returning_kline(code, period, start, count)
         return [self._make_kline(r, period) for r in rows]
 
+    def _find_host_returning_snapshot(self, market: int, code: str, coeff: float) -> list:
+        """Snapshot 空数据故障转移 — 自动切换到能返回有效行情的 IP。"""
+        bad_host = f"{self._current_host}:{self._current_port}"
+        ranked = self._ping_and_rank(self._all_hosts)
+
+        def _try(host: str) -> bool:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(self.timeout)
+                h, p = host.rsplit(":", 1)
+                s.connect((h, int(p)))
+                s.send(setup_cmd1()); self._recv_pass(s)
+                s.send(setup_cmd2()); self._recv_pass(s)
+                s.send(setup_cmd3()); self._recv_pass(s)
+                pkg = _b_snapshot(market, code)
+                s.send(pkg)
+                data = self._recv_response(s)
+                s.close()
+                rows = _p_snapshot(data, coefficient=coeff)
+                return len(rows) > 0
+            except Exception:
+                return False
+
+        new_host = find_working_host(ranked, _try, self._save_host, bad_host)
+        if new_host is None:
+            return []
+        self._connect_once(new_host)
+        data = self._send_recv(_b_snapshot(market, code))
+        return _p_snapshot(data, coefficient=coeff)
+
     def _find_host_returning_kline(self, code: str, period: str,
-                                     start: int = 0, count: int = 800) -> list:
+                                       start: int = 0, count: int = 800) -> list:
         """K 线空/截断数据故障转移。"""
         mid, _, num = split_code(code)
         cat = KLINE_CAT.get(period, 9)
