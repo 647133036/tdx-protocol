@@ -518,7 +518,17 @@ python -m pytest tdxproto/tests/ -v -m "not system"
 
 ## 变更记录
 
-- **1.0.7** — 修复 `KeyError: 0`（`_p_capital_flow` dict 索引 + `block_members`/`block_bridge` 在 `Quote` dataclass 上误用 `.get()`）；修复 `get_tdx_bk`/`get_tdx_stat`/`get_xgsg`/`chart_sampling` 超时（`report_file`/`chart_sampling` 从 40s+ 重试链改用 15s 短超时）；`chart_sampling` 服务器不支持时回退 kline 收盘价；`vol_profile` count 50000→2000（服务器上限 ~1800）；`unusual` 修复扫描指数代码而非股票（加前缀过滤）；`_p_quotes_list` 空响应崩溃修复；新增 `pyproject.toml` 让 `pip install git+...` 可用
+- **1.0.7** — 核心修复：缺失 `pyproject.toml` 导致 `pip install git+...` 静默失败，v1.0.3–v1.0.6 的全部修复从未生效到用户环境。本次修复清单：
+  - **打包**：新增 `pyproject.toml`（setuptools build-backend），`pip install git+https://...@v1.0.7` 开箱即用，构建产出 `.whl` + `.tar.gz` 均验证通过
+  - **KeyError: 0**：`mac/commands.py` `_p_capital_flow` 中 `today[0]` 在 dict 响应上索引崩溃 → 加 `isinstance` 类型守卫
+  - **AttributeError: 'Quote' object has no attribute 'get'**：`stock/client.py` `block_members` 和 `block_bridge.py` 在 `Quote` dataclass 上误用 `.get()` dict 方法 → 改为属性访问 `.name`/`.price`/`.change_pct`
+  - **get_tdx_bk / get_tdx_stat / get_tdx_stat2 / get_xgsg 超时**：`report_file()` 走 `_send_recv()` 40s+ 重试链（4 次退避 + 跨主机 failover）→ 改用 `_send_recv_quick(timeout=15)`，每个分块 15s 内返回
+  - **chart_sampling 超时**：服务器断连后 `_safe_send_recv` → `_send_recv` 40s+ → 改用 `_send_recv_quick(timeout=15)` + `kline()` 收盘价回退
+  - **history_orders 超时**：同上改用 `_send_recv_quick(timeout=15)`
+  - **vol_profile 返回空**：`today_trade` count=50000 服务器返回 0 条 → 降到 2000（服务器上限 ~1800）
+  - **unusual 返回空**：`codes()` 返回指数代码（395xxx）而非股票 → 加前缀过滤（SZ: 00/30 开头，SH: 60/68 开头）
+  - **_p_quotes_list 崩溃**：服务器返回 2 字节空响应时 `struct.unpack` 报 `unpack requires a buffer of 4 bytes` → 加 `len(data) < 4` 守卫
+  - **_get_zhb_file 缓存空结果**：首次下载失败后 `_zhb_cache = {}` 被永久缓存 → 加 `not self._zhb_cache` 条件允许重试
 - **1.0.6** — 4 个服务器不支持的命令改用替代实现获取数据（vol_profile 用 today_trade 计算成交量分布；index_momentum 用 kline 计算动量；index_info 用 board_members/codes_all+quotes_detail 获取成分股行情；unusual 用 today_trade 过滤大单）
 - **1.0.5** — 4 个命令超时修复（新增 `_send_recv_quick` 短超时方法，vol_profile/index_momentum/index_info/unusual 从卡死 40s+ 变成 1-2s 返回）
 - **1.0.4** — 修复 `market_stat`（`Quote` dataclass 误用 `.get()`）；50 接口全量实测验证；README 重写加入实测结果表和参数注意事项
