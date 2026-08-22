@@ -1,18 +1,21 @@
 # tdxproto — 通达信全协议解析器
 
-纯 Python 二进制协议实现，零外部依赖。覆盖 7709 A股 + 7727 期货双协议，自动故障转移。
+纯 Python 二进制协议实现，零外部依赖。覆盖 7709 A股 + 7727 期货双协议，7615 F10 资讯 HTTP 网关，自动故障转移。
+
+版本 **1.0.3**
 
 ## 特性
 
-- **零依赖** — 仅使用 Python 标准库 (`socket`/`struct`/`zlib`)
+- **零依赖** — 仅使用 Python 标准库 (`socket`/`struct`/`zlib`/`urllib`)
 - **双协议** — 7709 (A股: 行情/K线/分时/成交/财务/板块) + 7727 (期货/扩展行情)
 - **多数据源** — 巨潮资讯网公告检索 (`cninfo`) + 7615 F10 资讯 HTTP 网关 (`info`)
+- **字段字典** — 官方财务数据项编号字典，T/N 编码自动翻译为标准财务科目名
 - **IP 健康监控** — 自动扫描、测速、持久化、故障转移
 - **断线自愈** — 同主机退避重试 + 跨主机故障转移 + 命令失败后 NOP 重连
 - **板块解析** — `.dat` 板块文件本地解析
 - **本地计算** — 复权因子、换手率、除权除息、竞价快照
 - **数据模型** — 14 个 dataclass 统一表示 (Quote/Kline/Minute/Trade/...)
-- **258 个测试** — 单元/组件全覆盖
+- **276 个测试** — 单元/组件全覆盖
 
 ## 安装
 
@@ -134,9 +137,10 @@ for r in reports[:3]:
 profile = ic.company_profile("000001")
 print(profile.rows[0] if profile.rows else "无数据")
 
-# 财务报表
-finance = ic.finance_report("000001", "zcfzb")
-for row in finance.rows[:3]:
+# 资产负债表 / 现金流量表（102 行 / 99 行多报告期）
+balance = ic.finance_report("000001", "zcfzb")
+cashflow = ic.finance_report("000001", "xjllb")
+for row in balance.rows[:3]:
     print(row)
 ```
 
@@ -157,12 +161,23 @@ profile = col.profile("600519")
 print(profile["上市日期"], profile["发行价"], profile["主承销商"])
 
 # 资产负债表 / 现金流量表（T 编码已翻译为标准财务科目名）
-bs = col.balance_sheet("600519")  # [{"rq": "2026-06-30", "货币资金": 535..., "存货": 613..., ...}]
-cf = col.cashflow("600519")       # [{"rq": "2026-06-30", "经营活动产生的现金流量净额": 706..., ...}]
+bs = col.balance_sheet("600519")
+# [{"rq": "2026-06-30", "货币资金": 53518798979, "存货": 61317208371,
+#   "流动资产合计": 260724668103, "资产总计": 309050784569, ...}]
+
+cf = col.cashflow("600519")
+# [{"rq": "2026-06-30", "销售商品提供劳务收到的现金": 98421697395,
+#   "经营活动产生的现金流量净额": 70690750119, ...}]
 
 # 股东增减持计划 / 路演（含详情链接）
-plans = col.shareholder_plans("600519")  # [{"action": "拟增持", "amount_max": 33亿, "status": "完成", ...}]
-shows = col.roadshows(0, "000001")       # [{"title": "...", "url": "https://rs.p5w.net/...", ...}]
+plans = col.shareholder_plans("600519")
+# [{"action": "拟增持", "amount_max": 3300000000, "status": "完成", ...}]
+
+shows = col.roadshows(0, "000001")
+# [{"title": "...", "type": "业绩说明会", "url": "https://rs.p5w.net/...", ...}]
+
+# 财务诊断（营运/成长/盈利能力，含同行业对比 41 行）
+diag = col.diagnosis("600519", "yynl")
 
 # 题材内成分股排名（自动用数字题材 ID，需先取 topics）
 topics = col.topics("000001")
@@ -170,7 +185,7 @@ members = col.topic_members("000001", topics[0]["topic_id"])
 print(members[0])                # {"rank": 1, "code": "600577", "change_pct": 10.04, ...}
 ```
 
-字段字典来源：通达信官方「专业财务数据项」编号字典，规律为 `T 编码 = 官方编号 - 1`（资产负债表）和 `T 编码 = 官方编号 - 90`（现金流量表），已用 `StockClient.finance()` 交叉验证。
+字段字典来源：通达信官方「专业财务数据项」编号字典，规律为 `T 编码 = 官方编号 - 1`（资产负债表）和 `T 编码 = 官方编号 - 90`（现金流量表），已用 `StockClient.finance()` 交叉验证。利润表端点（`lrb`）7615 网关仅返回表头无数据，利润数据用 `StockClient.finance()` 获取（营收/净利润/营业利润等 37 字段）。
 
 每个 `snapshot` 中的条目均为结构化的 `dict`，字段含中文语义（如 `holding_pct`、`plan_text`、`pdf_url`），可直接写入数据库或导出 JSON/CSV。
 
@@ -330,15 +345,15 @@ auction = auction_0925(trades)
 |------|------|------|
 | **实时资讯** | `news(market, code)` | 实时新闻（100条） |
 | | `announcements(market, code)` | 公告列表（含PDF链接） |
-| | `roadshows(market, code)` | 路演列表 |
+| | `roadshows(market, code)` | 路演列表（含详情链接） |
 | **研报** | `research_reports(code, page, size)` | 研报列表（含评级/分析师） |
 | | `company_news(code, section, ...)` | 公司资讯 |
 | **概况** | `stock_info(code)` | 股票基础信息 |
 | | `company_profile(code, section)` | 公司概况（发行上市） |
 | | `business_periods(code)` | 主营构成可选报告期 |
 | | `business_composition(code, date)` | 主营构成 |
-| **财务** | `finance_report(code, type)` | 财务报表（资产负债/利润/现金流） |
-| | `finance_diagnosis(code, section)` | 财务诊断（营运/偿还/成长/盈利） |
+| **财务** | `finance_report(code, type)` | 资产负债表/现金流量表（利润表端点无数据） |
+| | `finance_diagnosis(code, section)` | 财务诊断（营运/成长/盈利，含同业对比） |
 | | `dividend_financing(code, section)` | 分红融资 |
 | **评分** | `stock_score(code, section)` | 个股总评 |
 | | `profit_forecast(code)` | 盈利预测 |
@@ -350,7 +365,7 @@ auction = auction_0925(trades)
 | | `topic_compare(code, topic_id, ...)` | 题材内对比排名 |
 | **低层** | `call(entry, body)` | 任意 TQLEX Entry |
 
-`InfoCollector`（推荐用于入库）：`snapshot()` 一次采集 15 类数据；`balance_sheet()`/`cashflow()` 已翻译 T 编码为标准财务科目名；`profile()` 字段全部中文化；`topic_members()` 需传数字题材 ID（来自 `topics()` 的 `topic_id` 字段，传中文名会返回空）。利润表端点无数据，利润数据用 `StockClient.finance()` 获取。
+`InfoCollector`（推荐用于入库）：`snapshot()` 一次采集 15 类数据；`balance_sheet()`/`cashflow()` 已翻译 T 编码为标准财务科目名；`profile()` 字段全部中文化；`diagnosis()` 返回含同行业对比的财务诊断；`shareholder_plans()` 返回增减持计划（需用有计划的股票测试，如 600519）；`roadshows()` 含路演详情链接；`topic_members()` 需传数字题材 ID（来自 `topics()` 的 `topic_id` 字段，传中文名会返回空）。利润数据用 `StockClient.finance()` 获取。
 
 ## 数据模型
 
@@ -399,13 +414,15 @@ tdxproto/
 │   ├── client.py     # CninfoClient（公告检索）
 │   └── models.py     # Announcement / CninfoError
 ├── info/             # 7615 F10 资讯 HTTP 网关
-│   ├── client.py     # InfoClient（新闻/公告/研报/财务/概况/题材）
+│   ├── client.py     # InfoClient（17 个方法）
+│   ├── collector.py  # InfoCollector（15 类结构化采集）
+│   ├── field_dict.py # 官方财务字段字典（T/N 编码翻译）
 │   └── models.py     # 响应模型
 ├── mac/              # MAC 协议
 │   ├── client.py     # MacClient（板块/成分股/排行）
 │   ├── commands.py   # 命令 + 枚举
 │   └── frame.py      # MAC 帧编解码
-└── tests/            # 258 个测试用例
+└── tests/            # 276 个测试用例
 ```
 
 ## 协议说明
@@ -434,6 +451,14 @@ tdxproto/
 - `MacClient` 连接 7709 端口，握手复用 StockClient 的 SetupCmd1/2/3
 - `StockClient` 自动代理板块相关方法到 `MacClient`
 
+### 7615 F10 资讯
+
+- **传输**: HTTP POST，JSON 请求/响应
+- **网关**: `static.tdx.com.cn:7615/TQLEX?Entry=<endpoint>`
+- **字段编码**: T0xx（财务报表）、N0xx（诊断/评分）、t0xx（题材）、拼音缩写（概况）
+- **字段字典**: 官方「专业财务数据项」编号 → T 编码，资产负债表 `T=编号-1`，现金流量表 `T=编号-90`
+- **InfoCollector**: 封装 15 类接口为结构化 dict，字段全部中文化
+
 ## 测试
 
 ```bash
@@ -441,7 +466,7 @@ python -m pytest tdxproto/tests/ -v
 python -m pytest tdxproto/tests/ -v -m "not system"
 ```
 
-测试覆盖：258 passed, 8 skipped（系统测试需连接真实服务器）。
+测试覆盖：276 passed, 8 skipped（系统测试需连接真实服务器）。
 
 ## 性能
 
@@ -449,6 +474,12 @@ python -m pytest tdxproto/tests/ -v -m "not system"
 - 全量 K 线翻页 (8000+ 条): 1-3s
 - 全市场代码扫描 (27000+ 只): 2-5s
 - 期货全市场扫描 (5 个交易所, 1163 个合约): 10-20s
+
+## 变更记录
+
+- **1.0.3** — 修复 6 个 InfoClient bug（finance_diagnosis scope、roadshows url、shareholder_plans 验证）；新增官方字段字典 `field_dict.py`（T 编码翻译）；InfoCollector 新增 6 个语义化方法（profile/balance_sheet/cashflow/diagnosis/shareholder_plans/roadshows），snapshot 从 8 类扩到 15 类；StockClient.quote 空数据故障转移；FuturesClient._exec 修复
+- **1.0.2** — 新增 InfoClient (7615 F10 HTTP 网关)；InfoCollector 结构化采集；topic_compare 数字 ID 修复
+- **1.0.1** — 完整 API 参考文档
 
 ## License
 
