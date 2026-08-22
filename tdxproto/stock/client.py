@@ -861,7 +861,7 @@ class StockClient:
         服务器不支持 0x051A 命令，改用今日逐笔成交数据按价格分组计算。
         price_levels: 最多返回的价格档位数。
         """
-        trades = self.today_trade(code, 0, 50000)
+        trades = self.today_trade(code, 0, 2000)
         if not trades:
             return {}
         from collections import defaultdict
@@ -967,11 +967,18 @@ class StockClient:
         """
         results = []
         try:
-            codes = self.codes(market, 0, 500)
-            for c in codes[:10]:
-                code = c.get("code", "") if isinstance(c, dict) else c
+            all_codes = self.codes(market, 0, 2000)
+            stock_codes = []
+            for c in all_codes:
+                code = c.get("code", "") if isinstance(c, dict) else str(c)
                 if not code:
                     continue
+                if market == 0 and not (code.startswith("00") or code.startswith("30")):
+                    continue
+                if market == 1 and not (code.startswith("60") or code.startswith("68")):
+                    continue
+                stock_codes.append(code)
+            for code in stock_codes[:50]:
                 full_code = f"{'sh' if market == 1 else 'sz'}{code}"
                 trades = self.today_trade(full_code, 0, 500)
                 for t in trades:
