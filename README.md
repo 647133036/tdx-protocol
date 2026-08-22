@@ -2,7 +2,7 @@
 
 纯 Python 二进制协议实现，零外部依赖。覆盖 7709 A股 + 7727 期货双协议，7615 F10 资讯 HTTP 网关，自动故障转移。
 
-版本 **1.0.6**
+版本 **1.0.7**
 
 ## 特性
 
@@ -16,14 +16,14 @@
 - **本地计算** — 复权因子、换手率、除权除息、竞价快照
 - **数据模型** — 14 个 dataclass 统一表示 (Quote/Kline/Minute/Trade/...)
 - **276 个测试** — 单元/组件全覆盖
-- **50 个接口实测** — A股 24 + 期货 10 + F10 16，全部可用（v1.0.6）
+- **pip 可安装** — `pyproject.toml` 打包，`pip install git+...` 开箱即用
 
 ## 安装
 
-Python 3.9+，零第三方依赖。当前版本通过 GitHub 安装：
+Python 3.9+，零第三方依赖。
 
 ```bash
-pip install git+https://github.com/647133036/tdx-protocol.git@v1.0.6
+pip install git+https://github.com/647133036/tdx-protocol.git@v1.0.7
 ```
 
 ## 快速开始
@@ -52,6 +52,20 @@ with StockClient(use_ip_health=True) as client:
 
     # 批量行情（用 quotes_detail 替代 refresh）
     quotes = client.quotes_detail(["sz000001", "sh600000"])
+
+    # 资金流向 / 标的详情 / 市场统计
+    flow = client.capital_flow("sz000001")
+    info = client.symbol_info("sz000001")
+    stat = client.market_stat()
+
+    # K 线采样（服务器不支持时自动回退 kline 收盘价）
+    prices = client.chart_sampling("sz000001")
+
+    # 成交量分布（用逐笔成交按价格分组计算）
+    vp = client.vol_profile("sz000001")
+
+    # 主力监控（扫描真实股票大单）
+    big_orders = client.unusual(market=0, count=50, min_volume=1000)
 ```
 
 ### 期货行情 (7727)
@@ -189,46 +203,31 @@ print(members[0])                # {"rank": 1, "code": "600577", "change_pct": 1
 
 字段字典来源：通达信官方「专业财务数据项」编号字典，规律为 `T 编码 = 官方编号 - 1`（资产负债表）和 `T 编码 = 官方编号 - 90`（现金流量表），已用 `StockClient.finance()` 交叉验证。利润表端点（`lrb`）7615 网关仅返回表头无数据，利润数据用 `StockClient.finance()` 获取（营收/净利润/营业利润等 37 字段）。
 
-### 50 接口全量实测结果 (v1.0.4)
+### 20 接口端到端实测结果 (v1.0.7)
 
 ```
-=== A股 StockClient (24/24) ===
-  [OK] codes_all(0)          [OK] kline day           [OK] finance
-  [OK] codes(0,0,5)          [OK] kline 1m            [OK] capital_flow
-  [OK] list(0,0,5)           [OK] kline_all day       [OK] stock_blocks
-  [OK] get_tdx_hy            [OK] sparkline           [OK] board_list(150,0)
-  [OK] quote(sh600519)       [OK] today_minute        [OK] market_stat
-  [OK] tick_chart            [OK] xdxr
-  [OK] today_trade           [OK] server_info
-                              [OK] symbol_info
-
-=== 期货 FuturesClient (10/10) ===
-  [OK] markets               [OK] quote IF2608        [OK] today_minute
-  [OK] codes(47,0,5)         [OK] quote_batch         [OK] today_trade
-  [OK] codes_all(47)         [OK] kline day           [OK] get_main_contract
-
-=== F10 InfoClient (16/16) ===
-  [OK] news(1,600519)          [OK] business_composition
-  [OK] announcements(1,600519) [OK] finance_report zcfzb
-  [OK] research_reports        [OK] finance_report xjllb
-  [OK] stock_info              [OK] finance_diagnosis
-  [OK] company_profile         [OK] dividend_financing
-  [OK] stock_score             [OK] topic_ids
-                                [OK] topic_compare
-                                [OK] shareholder_plans
-                                [OK] northbound_holding
-                                [OK] roadshows
+=== A股 StockClient (20/20 OK) ===
+  [OK] capital_flow        8 items    1.2s    主力净额/散户净额/5日资金流
+  [OK] symbol_info        18 items    1.2s    平安银行详细行情
+  [OK] market_stat       11 items    3.6s    涨25050 跌28620 总成交1.89万亿
+  [OK] get_tdx_bk        58 items   22.0s    概念板块简称↔全称
+  [OK] get_tdx_stat     8003 items    0.0s    全市场个股综合统计 (缓存)
+  [OK] get_tdx_stat2    8003 items    0.0s    全市场个股资金流向 (缓存)
+  [OK] get_xgsg          25 items    0.0s    新股申购列表 (缓存)
+  [OK] chart_sampling   100 items    1.1s    100日收盘价序列 (kline回退)
+  [OK] vol_profile       10 items    0.3s    8个价格档位买卖量分布
+  [OK] index_momentum     1 items    0.5s    上证指数5日动量 2213.79
+  [OK] index_info        52 items    1.2s    上证50成分股行情
+  [OK] unusual           50 items    3.5s    50笔大单(>=1000手)
+  [OK] quote              1 items    1.0s    五档盘口实时行情
+  [OK] kline(day)         5 items    0.5s    日K线OHLCV
+  [OK] today_minute    240 items    0.5s    240条分时数据
+  [OK] today_trade      100 items    0.5s    100笔逐笔成交
+  [OK] finance           37 items    0.5s    流通股本/总资产/净利润
+  [OK] xdxr              80 items    0.5s    除权除息历史
+  [OK] count(sz)          1 items    0.5s    深市24074只证券
+  [OK] tick_chart         5 items    0.5s    分时明细
 ```
-
-5 个接口需特别注意参数：
-
-| 接口 | 注意事项 |
-|------|---------|
-| `news`/`announcements` | 沪市股票用 `market=1`，深市用 `market=0` |
-| `board_members` | 需传正确板块代码，用 `board_list` 先取代码 |
-| `refresh` | 服务端拒绝，用 `quotes_detail` 替代 |
-| `chart_sampling` | 服务端返回空，用 `kline` 替代 |
-| `index_info` | 服务端不支持该命令 |
 
 ### IP 健康监控
 
@@ -292,7 +291,7 @@ auction = auction_0925(trades)
 | | `quote_list(category, ...)` | 分类行情列表 |
 | **K线** | `kline(code, period, start, count)` | K 线 |
 | | `kline_all(code, period, adjust)` | 全量 K 线（自动翻页 + 复权） |
-| | `chart_sampling(code)` | K 线采样（服务端返回空） |
+| | `chart_sampling(code)` | K 线采样（服务器不支持时回退 kline 收盘价） |
 | | `sparkline(code)` | 迷你走势 |
 | **分时** | `today_minute(code)` | 今日分时 |
 | | `history_minute(code, date)` | 历史分时 |
@@ -318,25 +317,25 @@ auction = auction_0925(trades)
 | | `block_info(file, start, size)` | 板块内容 |
 | **排行** | `top_board(category)` | 涨跌停板排行 |
 | | `quotes_list(category, start, count)` | 分类行情列表 |
-| | `unusual(market, start, count)` | 主力监控 |
+| | `unusual(market, start, count, min_volume)` | 主力监控（扫描真实股票大单） |
 | **统计** | `capital_flow(code)` | 资金流向 |
 | | `market_stat()` | 市场统计 |
 | | `limits(start, count)` | 涨跌停限制 |
-| | `index_momentum(code)` | 指数动能 |
-| | `index_info(code)` | 指数成分股（服务端不支持） |
+| | `index_momentum(code, period)` | 指数动能（用 kline 计算） |
+| | `index_info(code)` | 指数成分股（用 board_members 回退） |
+| | `vol_profile(code, price_levels)` | 成交量分布（用逐笔成交计算） |
 | **报表** | `report_file(filename, offset)` | 研报文件 |
 | | `get_report_file_raw(filename)` | 完整研报文件下载 |
 | | `get_zhb_files()` | 综合报表文件 (45 个) |
 | | `get_tdx_zs()` | 板块指数配置 (604 个) |
 | | `get_tdx_bk()` | 概念板块简称全称 (58 个) |
-| | `get_tdx_stat()` | 个股综合统计 (7964 条) |
-| | `get_tdx_stat2()` | 个股资金流向 (7964 条) |
-| | `get_xgsg()` | 新股申购 |
-| | `get_tdx_hy()` | 行业归属 (5634 条) |
+| | `get_tdx_stat()` | 个股综合统计 (8003 条) |
+| | `get_tdx_stat2()` | 个股资金流向 (8003 条) |
+| | `get_xgsg()` | 新股申购 (25 条) |
+| | `get_tdx_hy()` | 行业归属 (5647 条) |
 | **其他** | `server_info()` | 服务器信息 |
 | | `symbol_info(code)` | 标的详细信息 |
 | | `history_orders(code, date)` | 历史委托 |
-| | `vol_profile(code)` | 成交量分布 |
 | | `aux(code)` | 分时副图 |
 | | `do_heartbeat()` | 心跳 |
 
@@ -515,10 +514,13 @@ python -m pytest tdxproto/tests/ -v -m "not system"
 - 全量 K 线翻页 (8000+ 条): 1-3s
 - 全市场代码扫描 (27000+ 只): 2-5s
 - 期货全市场扫描 (5 个交易所, 1163 个合约): 10-20s
+- zhb.zip 下载 (45 个 cfg 文件): 20-22s（首次下载后缓存，后续 0s）
 
 ## 变更记录
 
+- **1.0.7** — 修复 `KeyError: 0`（`_p_capital_flow` dict 索引 + `block_members`/`block_bridge` 在 `Quote` dataclass 上误用 `.get()`）；修复 `get_tdx_bk`/`get_tdx_stat`/`get_xgsg`/`chart_sampling` 超时（`report_file`/`chart_sampling` 从 40s+ 重试链改用 15s 短超时）；`chart_sampling` 服务器不支持时回退 kline 收盘价；`vol_profile` count 50000→2000（服务器上限 ~1800）；`unusual` 修复扫描指数代码而非股票（加前缀过滤）；`_p_quotes_list` 空响应崩溃修复；新增 `pyproject.toml` 让 `pip install git+...` 可用
 - **1.0.6** — 4 个服务器不支持的命令改用替代实现获取数据（vol_profile 用 today_trade 计算成交量分布；index_momentum 用 kline 计算动量；index_info 用 board_members/codes_all+quotes_detail 获取成分股行情；unusual 用 today_trade 过滤大单）
+- **1.0.5** — 4 个命令超时修复（新增 `_send_recv_quick` 短超时方法，vol_profile/index_momentum/index_info/unusual 从卡死 40s+ 变成 1-2s 返回）
 - **1.0.4** — 修复 `market_stat`（`Quote` dataclass 误用 `.get()`）；50 接口全量实测验证；README 重写加入实测结果表和参数注意事项
 - **1.0.3** — 修复 6 个 InfoClient bug（finance_diagnosis scope、roadshows url、shareholder_plans）；新增官方字段字典 `field_dict.py`；InfoCollector 新增 6 个语义化方法，snapshot 从 8 类扩到 15 类；StockClient.quote 空数据故障转移
 - **1.0.2** — 新增 InfoClient (7615 F10 HTTP 网关)；InfoCollector 结构化采集；topic_compare 数字 ID 修复
