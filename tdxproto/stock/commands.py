@@ -1092,6 +1092,8 @@ def _p_top_board(data: bytes) -> dict:
 
 def _p_quotes_list(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """板块行情列表."""
+    if len(data) < 4:
+        return []
     block, count = struct.unpack("<HH", data[:4])
     pos = 4
     stocks = []
