@@ -20,8 +20,9 @@ class TestStockSystem:
 
     def test_quote(self):
         with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:
-            results = c.quote("sz000001")
-            assert len(results) > 0
+            q = c.quote("sz000001")
+            assert q.code.endswith("000001")
+            assert q.price != 0
 
     def test_kline(self):
         with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:

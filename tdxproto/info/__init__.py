@@ -13,13 +13,14 @@
 """
 
 from .client import InfoClient
+from .collector import InfoCollector
 from .models import (
     TqlexError, TqlexResponse, TqlexResultSet,
     NewsItem, AnnouncementItem, ResearchReport,
 )
 
 __all__ = [
-    "InfoClient",
+    "InfoClient", "InfoCollector",
     "TqlexError", "TqlexResponse", "TqlexResultSet",
     "NewsItem", "AnnouncementItem", "ResearchReport",
 ]

@@ -140,6 +140,26 @@ for row in finance.rows[:3]:
     print(row)
 ```
 
+**InfoCollector — 结构化采集（推荐）**：8 个已验证的干净接口统一封装，字段用可读名而非 T001/T002 编码，数值保真，可直接入库：
+
+```python
+from tdxproto import InfoCollector
+
+col = InfoCollector()
+# 一次性采集全部 8 类数据（新闻/公告/研报/主营/北向/分红/题材/评分）
+snap = col.snapshot(0, "000001")
+print(f"新闻 {len(snap['news'])} 条, 公告 {len(snap['announcements'])} 条, "
+      f"研报 {len(snap['research_reports'])} 条, 分红 {len(snap['dividends'])} 条")
+print(snap["score"][0])          # {"total_score": 2.9, "rank": 13, ...}
+
+# 题材内成分股排名（自动用数字题材 ID，需先取 topics）
+topics = col.topics("000001")
+members = col.topic_members("000001", topics[0]["topic_id"])
+print(members[0])                # {"rank": 1, "code": "600577", "change_pct": 10.04, ...}
+```
+
+每个 `snapshot` 中的条目均为结构化的 `dict`，字段含中文语义（如 `holding_pct`、`plan_text`、`pdf_url`），可直接写入数据库或导出 JSON/CSV。
+
 ### IP 健康监控
 
 ```python
@@ -315,6 +335,8 @@ auction = auction_0925(trades)
 | | `topic_ids(code)` | 题材 ID 列表 |
 | | `topic_compare(code, topic_id, ...)` | 题材内对比排名 |
 | **低层** | `call(entry, body)` | 任意 TQLEX Entry |
+
+`InfoCollector`（推荐用于入库）：`snapshot()` 一次采集 8 类干净数据；`topic_members()` 需传数字题材 ID（来自 `topics()` 的 `topic_id` 字段，传中文名会返回空）。
 
 ## 数据模型
 

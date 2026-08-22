@@ -28,7 +28,7 @@ from .compute import compute_factors, get_equity_at, calc_turnover, parse_xdxr, 
 from .stock import StockClient
 from .futures import FuturesClient
 from .cninfo import CninfoClient, Announcement, CninfoError
-from .info import InfoClient
+from .info import InfoClient, InfoCollector
 from .scanner import (
     scan_stock, scan_futures, ProbeResult,
     DEFAULT_TIMEOUT, DEFAULT_WORKERS,
@@ -53,7 +53,7 @@ except ImportError:
 __version__ = "1.0.2"
 __all__ = [
     "StockClient", "FuturesClient", "MacClient",
-    "InfoClient",
+    "InfoClient", "InfoCollector",
     "CninfoClient", "Announcement", "CninfoError",
     "Quote", "Kline", "Minute", "Trade",
     "EquityChange", "FinanceInfo", "PriceLimit",
