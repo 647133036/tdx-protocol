@@ -1117,15 +1117,15 @@ class StockClient:
         except Exception:
             return {}
 
-        up = round(q1.get("price", 0) * 10) if q1 else 0
-        down = round(q1.get("open", 0) * 10) if q1 else 0
-        neutral = round(q1.get("low", 0) * 10) if q1 else 0
-        total = round(q1.get("high", 0) * 10) if q1 else 0
-        limit_up = round(q3.get("price", 0) * 10) if q3 else 0
-        limit_down = round(q3.get("open", 0) * 10) if q3 else 0
-        market_cap = q2.get("amount", 0) if q2 else 0
-        total_amount = q1.get("amount", 0) if q1 else 0
-        total_volume = q1.get("vol", 0) if q1 else 0
+        up = round(q1.price * 10) if q1 else 0
+        down = round(q1.open * 10) if q1 else 0
+        neutral = round(q1.low * 10) if q1 else 0
+        total = round(q1.high * 10) if q1 else 0
+        limit_up = round(q3.price * 10) if q3 else 0
+        limit_down = round(q3.open * 10) if q3 else 0
+        market_cap = q2.amount if q2 else 0
+        total_amount = q1.amount if q1 else 0
+        total_volume = q1.volume if q1 else 0
 
         return {
             "up_count": up,
