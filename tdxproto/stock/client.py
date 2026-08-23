@@ -214,7 +214,10 @@ class StockClient:
         resp_type, _, _, zip_len, unzip_len = struct.unpack("<IIIHH", hdr)
         body = self._sock_read(s, zip_len)
         if zip_len != unzip_len:
-            body = zlib.decompress(body)
+            try:
+                body = zlib.decompress(body)
+            except zlib.error:
+                return b"\x00\x00"
         return body
 
     def _start_heartbeat(self):
@@ -721,7 +724,7 @@ class StockClient:
         try:
             data = self._send_recv(_b_finance(mid, num))
             return _p_finance(data)
-        except (struct.error, IndexError):
+        except (struct.error, IndexError, KeyError):
             return {"market": mid, "code": code, "error": "no finance data"}
 
     def company_info_cat(self, code: str) :
@@ -749,7 +752,10 @@ class StockClient:
     def report_file(self, filename: str, offset: int = 0) -> dict:
         """下载财务报表文件."""
         data = self._send_recv_quick(_b_report_file(filename, offset), timeout=15)
-        return _p_report_file(data)
+        try:
+            return _p_report_file(data)
+        except (struct.error, KeyError):
+            return {"chunksize": 0}
 
     def get_report_file_raw(self, filename: str) -> bytes:
         """下载报表文件完整内容（自动分块拼接）."""
@@ -861,7 +867,10 @@ class StockClient:
         服务器不支持 0x051A 命令，改用今日逐笔成交数据按价格分组计算。
         price_levels: 最多返回的价格档位数。
         """
-        trades = self.today_trade(code, 0, 2000)
+        try:
+            trades = self.today_trade(code, 0, 2000)
+        except Exception:
+            return {}
         if not trades:
             return {}
         from collections import defaultdict
@@ -922,6 +931,14 @@ class StockClient:
             return {"code": code, "members": quotes, "count": len(quotes)}
         except Exception:
             pass
+        try:
+            mid, _, num = split_code(code)
+            data = self._send_recv_quick(_b_index_info(mid, num), timeout=3.0)
+            result = _p_index_info(data)
+            if result and result.get("code"):
+                return result
+        except Exception:
+            pass
         return {"code": code, "error": "no index data available"}
 
     def quotes_detail(self, code_list) -> dict:
@@ -944,13 +961,20 @@ class StockClient:
     def auction(self, code: str, mode: int = 3):
         """集合竞价."""
         mid, _, num = split_code(code)
-        data = self._quote_safe_send_recv(_b_auction(mid, num, mode=mode))
-        return _p_auction(data)
+        data = self._send_recv_quick(_b_auction(mid, num, mode=mode), timeout=3.0)
+        try:
+            return _p_auction(data)
+        except (struct.error, KeyError):
+            return []
 
     def top_board(self, category: int = 0):
         """涨跌停板. category: 0=涨停, 1=跌停, 2=振幅, 3=涨速, 4=跌速, 5=量比, 6=正委比, 7=负委比, 8=换手."""
         data = self._quote_safe_send_recv(_b_top_board(category))
-        return _p_top_board(data)
+        try:
+            return _p_top_board(data)
+        except (struct.error, KeyError):
+            return {k: [] for k in ["increase", "decrease", "amplitude", "rise_speed", "fall_speed",
+                                      "vol_ratio", "pos_commission_ratio", "neg_commission_ratio", "turnover"]}
 
     def quotes_list(self, category: int, start: int = 0, count: int = 80,
                     sort_type: int = 0, reverse: bool = False,

@@ -156,7 +156,7 @@ def stock_info(c, a):
     except Exception as e: result["auction"] = {"error": str(e)}
     try: result["equity"] = js_inner(c.capital_changes(code))
     except Exception as e: result["equity"] = {"error": str(e)}
-    try: result["finance"] = js_inner(c.finance([code]))
+    try: result["finance"] = js_inner(c.finance(code))
     except Exception as e: result["finance"] = {"error": str(e)}
     js(result)
 
