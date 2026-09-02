@@ -533,21 +533,46 @@ def _p_snapshot(data: bytes, coefficient: float = 0.01) -> list[dict]:
 def _cal_price(base_p, diff, coefficient=0.01):
     return float(base_p + diff) * coefficient
 
-def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 0.01) -> list[dict]:
+def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 0.01,
+             market: int = None) -> list[dict]:
     """对齐 pytdx GetSecurityBarsCmd.parseResponse.
-    
+
     股票K线格式: date(4) + OHLC(4xget_price) + vol(4) + amt(4)
     无extra字段。
-    
-    使用差分编码: pre_diff_base = open_updated + close_diff_raw
+
+    指数K线格式: 同上 + 每条记录末尾额外 4 字节（上涨家数 uint16 + 下跌家数 uint16）。
+
+    vol 字段语义修正（issue #64）：
+      - 指数分钟线（cat 0/1/2/3/7/8）：f1 实为成交额(百元)，真实成交量不在报文中
+        → vol 置 NaN，不拿成交额冒充成交量；
+      - 周/月/季/年线（cat 5/6/10/11）：服务端 vol = 真实成交量/100
+        → ×100 还原，与日线单位对齐（指数=手、个股=股）；
+      - 日线（cat 4/9）：f1 = 真实成交量，无需修正。
     """
+    import math
+    _MINUTE_CATS = frozenset({0, 1, 2, 3, 7, 8})
+    _WEEK_PLUS_CATS = frozenset({5, 6, 10, 11})
+
+    is_idx = False
+    if code:
+        nc = code.strip().lower()
+        ex = ""
+        if nc.startswith(("sz", "sh", "bj")):
+            ex = nc[:2]
+            nc = nc[2:]
+        # 指数判定：需同时满足 market 和代码前缀两个条件
+        # SH(1): 000xxx=上证指数, 88xxx=板块指数; SZ(0): 399xxx=深证指数
+        if (market == 1 and nc.startswith(("000", "88"))) or \
+           (market == 0 and nc.startswith("399")):
+            is_idx = True
+
     if len(data) < 4:
         return []
     (ret_count,) = struct.unpack("<H", data[0:2])
     pos = 2
     klines = []
     pre_diff_base = 0
-    
+
     for i in range(ret_count):
         year, month, day, hour, minute, pos = _get_datetime(category, data, pos)
         price_open_diff, pos = get_price(data, pos)
@@ -560,13 +585,24 @@ def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 
         (db_vol_raw,) = struct.unpack("<I", data[pos:pos+4])
         db_vol = decode_volume(db_vol_raw)
         pos += 4
-        
+
+        # 指数记录额外 4 字节：上涨家数 + 下跌家数（各 uint16 LE）
+        if is_idx:
+            pos += 4
+
         open_ = _cal_price1000(price_open_diff, pre_diff_base)
         price_open_diff = price_open_diff + pre_diff_base
         close = _cal_price1000(price_open_diff, price_close_diff)
         high = _cal_price1000(price_open_diff, price_high_diff)
         low = _cal_price1000(price_open_diff, price_low_diff)
         pre_diff_base = price_open_diff + price_close_diff
+
+        # vol 语义修正
+        if is_idx and category in _MINUTE_CATS:
+            vol = float("nan")
+        elif category in _WEEK_PLUS_CATS:
+            vol *= 100.0
+
         kline = {
             "open": open_, "close": close, "high": high, "low": low,
             "vol": vol, "amount": db_vol,
@@ -574,7 +610,9 @@ def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 
             "hour": hour, "minute": minute,
             "datetime": f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}",
         }
-        klines.append(kline)
+        # 过滤服务器返回的非法日期行（无效股票代码时服务器可能返回 buffer 残留垃圾数据）
+        if 1 <= month <= 12 and 1 <= day <= 31 and 2000 <= year <= 2100 and open_ > 0:
+            klines.append(kline)
     return klines
 
 def _cal_price1000(base_p, diff):

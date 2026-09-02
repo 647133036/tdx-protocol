@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import io
+import math
 import socket
 import struct
 import time
@@ -15,7 +16,7 @@ from datetime import date, timedelta
 from typing import Optional, Sequence
 
 from ..codec import split_code, decode_volume, get_price, u32, int_date, normalize_code
-from ..models import EquityChange, Kline, Minute, Trade, Quote
+from ..models import EquityChange, Kline, Minute, Trade, Quote, PriceLimit
 from ..ip_health import get_manager, HostManager
 from .._reconnect import RETRY_DELAYS, select_best_host, find_working_host
 from ..scanner import scan_stock
@@ -52,7 +53,7 @@ from ..hosts import STOCK_HOSTS_FAST as STOCK_HOSTS
 
 # K线 category 映射
 KLINE_CAT = {
-    "1m": 8, "5m": 0, "15m": 1, "30m": 2, "60m": 3,
+    "1m": 7, "3m": 8, "5m": 0, "15m": 1, "30m": 2, "60m": 3,
     "day": 9, "week": 5, "month": 6, "quarter": 10, "year": 11,
 }
 
@@ -145,10 +146,12 @@ class StockClient:
             self._recv_pass(sock)
             self.sock = sock
             self._start_heartbeat()
+        except (SystemExit, KeyboardInterrupt):
+            raise
         except Exception:
             if sock:
                 try: sock.close()
-                except: pass
+                except Exception: pass
             raise
 
     def connect(self):
@@ -263,18 +266,26 @@ class StockClient:
         self._last_request_time = time.monotonic()
 
     def _send_recv(self, pkg: bytes) -> bytes:
-        """发送请求包并接收响应（带锁 + 速率限制 + 指数退避重连 + 跨主机故障转移）。"""
+        """发送请求包并接收响应（带锁 + 速率限制 + 指数退避重连 + 跨主机故障转移）。
+
+        优化：空响应 (b"\\x00\\x00") 不触发重连链，直接返回 — 这是服务器
+        "无此标的数据" 的正常信号，不应消耗 3.6s+ 的重试时间。
+        """
         with self._lock:
             if not self.sock:
                 self.connect()
             self._throttle()
             try:
                 self.sock.send(pkg)
-                return self._recv_response(self.sock)
+                data = self._recv_response(self.sock)
+                # 空响应 = 服务器无数据，非连接错误，直接返回
+                if data == b"\x00\x00":
+                    return data
+                return data
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, ConnectionError) as e:
                 self.sock = None
                 last_err = e
-                # 第一阶段：同主机指数退避重试
+                # 第一阶段：同主机指数退避重试（仅连接错误才重试）
                 for delay in RETRY_DELAYS:
                     time.sleep(delay)
                     try:
@@ -481,21 +492,21 @@ class StockClient:
             high=r.get('high', 0.0),
             low=r.get('low', 0.0),
             close=r.get('close', 0.0),
-            volume=int(r.get('vol', 0)),
+            volume=int(r.get('vol', 0)) if not (isinstance(r.get('vol'), float) and math.isnan(r['vol'])) else 0,
             amount=r.get('amount', 0.0),
             position=r.get('position', 0),
             settlement=r.get('settlement', 0.0),
         )
 
     def kline(self, code: str, period: str = "day", start: int = 0, count: int = 800,
-              adjust: str = "", anchor: str = "") -> list[Kline]:
-        """获取K线数据。空数据时自动故障转移到其他主机。"""
+              adjust: str = "", anchor: str = "", failover: bool = True) -> list[Kline]:
+        """获取K线数据。空数据时自动故障转移到其他主机."""
         mid, _, num = split_code(code)
         cat = KLINE_CAT.get(period, 9)
         coeff = self._get_coefficient(mid, num)
         data = self._send_recv(_b_kline(mid, num, cat, start, count))
-        rows = _p_kline(data, cat, code, coefficient=coeff)
-        if start == 0 and self.auto_reconnect:
+        rows = _p_kline(data, cat, code, coefficient=coeff, market=mid)
+        if start == 0 and failover and self.auto_reconnect:
             if not rows or (count > 10 and len(rows) < count * 0.3):
                 rows = self._find_host_returning_kline(code, period, start, count)
         return [self._make_kline(r, period) for r in rows]
@@ -552,7 +563,7 @@ class StockClient:
                 s.send(pkg)
                 data = self._recv_response(s)
                 s.close()
-                rows = _p_kline(data, cat, code, coefficient=coeff)
+                rows = _p_kline(data, cat, code, coefficient=coeff, market=mid)
                 return len(rows) > 0
             except Exception:
                 return False
@@ -563,10 +574,11 @@ class StockClient:
             return []
         self._connect_once(new_host)
         data = self._send_recv(_b_kline(mid, num, cat, start, count))
-        return _p_kline(data, cat, code, coefficient=coeff)
+        return _p_kline(data, cat, code, coefficient=coeff, market=mid)
 
-    def kline_all(self, code: str, period: str = "day", adjust: str = "") -> list[Kline]:
-        """自动翻页拉取全量K线."""
+    def kline_all(self, code: str, period: str = "day", adjust: str = "",
+                  failover: bool = True) -> list[Kline]:
+        """自动翻页拉取全量K线，空数据时自动故障转移."""
         mid, _, num = split_code(code)
         cat = KLINE_CAT.get(period, 9)
         coeff = self._get_coefficient(mid, num)
@@ -574,14 +586,27 @@ class StockClient:
         start = 0
         batch_size = 800
         empty_pages = 0
+        consecutive_empty = 0
         while empty_pages < 3:
             data = self._send_recv(_b_kline(mid, num, cat, start, batch_size))
-            rows = _p_kline(data, cat, code, coefficient=coeff)
-            all_bars.extend(self._make_kline(r, period) for r in rows)
+            rows = _p_kline(data, cat, code, coefficient=coeff, market=mid)
             if not rows:
+                consecutive_empty += 1
                 empty_pages += 1
                 start += batch_size
+                # 连续3页空数据 → 触发故障转移
+                if consecutive_empty >= 3 and failover and self.auto_reconnect:
+                    rows = self._find_host_returning_kline(code, period, start - batch_size, batch_size)
+                    if rows:
+                        all_bars.extend(self._make_kline(r, period) for r in rows)
+                        consecutive_empty = 0
+                        empty_pages = 0
+                        start += len(rows)
+                    else:
+                        break
                 continue
+            consecutive_empty = 0
+            all_bars.extend(self._make_kline(r, period) for r in rows)
             start += len(rows)
             if len(rows) < batch_size:
                 break
@@ -1070,6 +1095,53 @@ class StockClient:
         data = self._quote_safe_send_recv(_b_limits(start, count))
         return _p_limits(data)
 
+    def get_price_limits(self, code: str) -> PriceLimit:
+        """计算个股涨跌停价格.
+        
+        根据板块规则自动判断涨跌幅限制:
+        - 主板 (000/001/002/003/600/601/603/605): 10%
+        - ST/*ST: 5%
+        - 科创板 (688) / 创业板 (300/301): 20%
+        - 北交所 (43/83/87/92): 30%
+        - 上市初期 (前5个交易日): 无涨跌停限制
+        """
+        from ..codec import split_code
+        
+        # 获取实时行情获取昨收价
+        try:
+            q = self.quote(code)
+            pre_close = q.pre_close
+            name = q.name
+        except Exception:
+            return PriceLimit(code=code, upper=0.0, lower=0.0)
+        
+        if pre_close <= 0:
+            return PriceLimit(code=code, upper=0.0, lower=0.0)
+        
+        # 提取纯数字代码（去掉 sz/sh/bj 前缀）
+        mid, _, num = split_code(code)
+        pure_code = num  # 纯数字代码
+        
+        # 判断板块类型
+        limit_pct = 0.10  # 默认 10%
+        upper_name = name.upper()
+        
+        # ST 判断
+        if "ST" in upper_name:
+            limit_pct = 0.05
+        # 科创板 / 创业板
+        elif pure_code.startswith("688") or pure_code.startswith(("300", "301")):
+            limit_pct = 0.20
+        # 北交所
+        elif pure_code.startswith(("43", "83", "87", "92")):
+            limit_pct = 0.30
+        
+        # 计算涨跌停价
+        upper = round(pre_close * (1 + limit_pct), 2)
+        lower = round(pre_close * (1 - limit_pct), 2)
+        
+        return PriceLimit(code=code, upper=upper, lower=lower)
+
     def sparkline(self, code: str) -> list[float]:
         """小走势图 — 用 1min K 线收盘价序列替代 (CMD 0xFD1 不可用)."""
         bars = self.kline(code, '1m', 0, 240)
@@ -1428,12 +1500,18 @@ class StockClient:
     def _save_host(self, host: str) -> None:
         """持久化最优 host（写入 ip_health 缓存）。"""
         try:
-            from ..ip_health import get_manager
+            from ..ip_health import get_manager, HostEntry, HEALTH_OK
             m = get_manager()
             for e in m.pool.entries.values():
                 if e.host == host and e.protocol == "7709":
                     return
-            # 保存到缓存文件
+            # 新增发现的主机，添加到池后再保存
+            port = int(host.rsplit(":", 1)[1]) if ":" in host else 7709
+            entry = HostEntry(
+                host=host, port=port, protocol="7709",
+                tcp_ok=True, handshake_ok=True, status=HEALTH_OK,
+            )
+            m.pool.add(entry)
             m.save_cache()
         except Exception:
             pass
