@@ -202,6 +202,60 @@ class TestParsers:
         assert result[1]["high"] == pytest.approx(10.80, abs=0.001)
         assert result[1]["low"] == pytest.approx(10.10, abs=0.001)
 
+    def test_kline_filters_invalid_dates(self):
+        """服务器对无效股票代码返回垃圾数据（buffer 残留），month/day 超出合法范围应被过滤."""
+        def ev(val):
+            if val == 0:
+                return b"\x00"
+            sign = 0x40 if val < 0 else 0
+            av = abs(val)
+            fb = (av & 0x3F) | sign
+            av >>= 6
+            if av == 0:
+                return bytes([fb])
+            r = bytearray([fb | 0x80])
+            while av:
+                r.append((av & 0x7F) | (0x80 if (av >> 7) else 0))
+                av >>= 7
+            return bytes(r)
+
+        def encode_vol(v: float) -> int:
+            return struct.unpack("<I", struct.pack("<f", v))[0]
+
+        bars_data = bytearray()
+        # 合法行 1: year=2025, month=1, day=10
+        bars_data.extend(struct.pack("<I", 20250110))
+        bars_data.extend(ev(10000))   # open diff
+        bars_data.extend(ev(500))     # close diff
+        bars_data.extend(ev(1000))    # high diff
+        bars_data.extend(ev(-200))    # low diff
+        bars_data.extend(struct.pack("<I", encode_vol(1000000)))
+        bars_data.extend(struct.pack("<I", encode_vol(10500000)))
+        # 垃圾行: year=6684, month=79, day=89 (month > 12, day > 31)
+        bars_data.extend(struct.pack("<I", 66847989))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(struct.pack("<I", 0))
+        bars_data.extend(struct.pack("<I", 0))
+        # 另一垃圾行: year=125298, month=47, day=62
+        bars_data.extend(struct.pack("<I", 1252984762))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(struct.pack("<I", 0))
+        bars_data.extend(struct.pack("<I", 0))
+
+        count = 3
+        resp = struct.pack("<H", count) + bytes(bars_data)
+        result = _p_kline(resp, 9, "sh999999", 0.01)
+        assert len(result) == 1, f"expected 1 valid row, got {len(result)}"
+        assert result[0]["year"] == 2025
+        assert result[0]["month"] == 1
+        assert result[0]["day"] == 10
+
     def test_xdxr_empty(self):
         assert _p_xdxr(b"") == []
 
@@ -210,8 +264,24 @@ class TestParsers:
             _p_finance(b"")
 
     def test_today_minute_empty(self):
-        with pytest.raises(struct.error):
-            _p_today_minute(b"")
+        assert _p_today_minute(b"") == []
+        assert _p_today_minute(b"\x00\x00") == []
+
+    def test_today_trade_short_packet(self):
+        assert _p_today_trade(b"") == []
+        assert _p_today_trade(b"\x05\x00") == []
+
+    def test_history_minute_short_packet(self):
+        assert _p_history_minute(b"") == []
+        assert _p_history_minute(b"\x03\x00") == []
+
+    def test_history_trade_short_packet(self):
+        assert _p_history_trade(b"") == []
+        assert _p_history_trade(b"\x03\x00") == []
+
+    def test_snapshot_short_packet(self):
+        assert _p_snapshot(b"") == []
+        assert _p_snapshot(b"\x00\x00") == []
 
     def test_today_minute_parse(self):
         """验证今日分时解析: 第一个varint是时间偏移(跳过), 第二个是价格差异."""

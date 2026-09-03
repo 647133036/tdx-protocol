@@ -446,88 +446,93 @@ def _p_list(data: bytes) -> list[dict]:
 
 def _p_snapshot(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetSecurityQuotesCmd.parseResponse."""
+    if len(data) < 4:
+        return []
     pos = 0
     pos += 2  # skip b1 cb
     (num_stock,) = struct.unpack("<H", data[pos:pos+2])
     pos += 2
     stocks = []
-    for _ in range(num_stock):
-        market, code, active1 = struct.unpack("<B6sH", data[pos:pos+9])
-        pos += 9
-        price, pos = get_price(data, pos)
-        last_close_diff, pos = get_price(data, pos)
-        open_diff, pos = get_price(data, pos)
-        high_diff, pos = get_price(data, pos)
-        low_diff, pos = get_price(data, pos)
-        reversed_bytes0, pos = get_price(data, pos)
-        reversed_bytes1, pos = get_price(data, pos)
-        vol, pos = get_price(data, pos)
-        cur_vol, pos = get_price(data, pos)
-        (amount_raw,) = struct.unpack("<I", data[pos:pos+4])
-        amount = decode_volume(amount_raw)
-        pos += 4
-        s_vol, pos = get_price(data, pos)
-        b_vol, pos = get_price(data, pos)
-        reversed_bytes2, pos = get_price(data, pos)
-        reversed_bytes3, pos = get_price(data, pos)
-        bid1, pos = get_price(data, pos)
-        ask1, pos = get_price(data, pos)
-        bid_vol1, pos = get_price(data, pos)
-        ask_vol1, pos = get_price(data, pos)
-        bid2, pos = get_price(data, pos)
-        ask2, pos = get_price(data, pos)
-        bid_vol2, pos = get_price(data, pos)
-        ask_vol2, pos = get_price(data, pos)
-        bid3, pos = get_price(data, pos)
-        ask3, pos = get_price(data, pos)
-        bid_vol3, pos = get_price(data, pos)
-        ask_vol3, pos = get_price(data, pos)
-        bid4, pos = get_price(data, pos)
-        ask4, pos = get_price(data, pos)
-        bid_vol4, pos = get_price(data, pos)
-        ask_vol4, pos = get_price(data, pos)
-        bid5, pos = get_price(data, pos)
-        ask5, pos = get_price(data, pos)
-        bid_vol5, pos = get_price(data, pos)
-        ask_vol5, pos = get_price(data, pos)
-        (reversed_bytes4,) = struct.unpack("<H", data[pos:pos+2])
-        pos += 2
-        reversed_bytes5, pos = get_price(data, pos)
-        reversed_bytes6, pos = get_price(data, pos)
-        reversed_bytes7, pos = get_price(data, pos)
-        reversed_bytes8, pos = get_price(data, pos)
-        reversed_bytes9, active2 = struct.unpack("<hH", data[pos:pos+4])
-        pos += 4
-        code_str = code.decode("utf-8")
-        one_stock = {
-            "market": market, "code": code_str, "active1": active1,
-            "price": _cal_price(price, 0, coefficient),
-            "last_close": _cal_price(price, last_close_diff, coefficient),
-            "open": _cal_price(price, open_diff, coefficient),
-            "high": _cal_price(price, high_diff, coefficient),
-            "low": _cal_price(price, low_diff, coefficient),
-            "servertime": reversed_bytes0,
-            "vol": vol, "cur_vol": cur_vol, "amount": amount,
-            "s_vol": s_vol, "b_vol": b_vol,
-            "bid1": _cal_price(price, bid1, coefficient),
-            "ask1": _cal_price(price, ask1, coefficient),
-            "bid_vol1": bid_vol1, "ask_vol1": ask_vol1,
-            "bid2": _cal_price(price, bid2, coefficient),
-            "ask2": _cal_price(price, ask2, coefficient),
-            "bid_vol2": bid_vol2, "ask_vol2": ask_vol2,
-            "bid3": _cal_price(price, bid3, coefficient),
-            "ask3": _cal_price(price, ask3, coefficient),
-            "bid_vol3": bid_vol3, "ask_vol3": ask_vol3,
-            "bid4": _cal_price(price, bid4, coefficient),
-            "ask4": _cal_price(price, ask4, coefficient),
-            "bid_vol4": bid_vol4, "ask_vol4": ask_vol4,
-            "bid5": _cal_price(price, bid5, coefficient),
-            "ask5": _cal_price(price, ask5, coefficient),
-            "bid_vol5": bid_vol5, "ask_vol5": ask_vol5,
-            "reversed_bytes9": reversed_bytes9 / 100.0,
-            "active2": active2,
-        }
-        stocks.append(one_stock)
+    try:
+        for _ in range(num_stock):
+            market, code, active1 = struct.unpack("<B6sH", data[pos:pos+9])
+            pos += 9
+            price, pos = get_price(data, pos)
+            last_close_diff, pos = get_price(data, pos)
+            open_diff, pos = get_price(data, pos)
+            high_diff, pos = get_price(data, pos)
+            low_diff, pos = get_price(data, pos)
+            reversed_bytes0, pos = get_price(data, pos)
+            reversed_bytes1, pos = get_price(data, pos)
+            vol, pos = get_price(data, pos)
+            cur_vol, pos = get_price(data, pos)
+            (amount_raw,) = struct.unpack("<I", data[pos:pos+4])
+            amount = decode_volume(amount_raw)
+            pos += 4
+            s_vol, pos = get_price(data, pos)
+            b_vol, pos = get_price(data, pos)
+            reversed_bytes2, pos = get_price(data, pos)
+            reversed_bytes3, pos = get_price(data, pos)
+            bid1, pos = get_price(data, pos)
+            ask1, pos = get_price(data, pos)
+            bid_vol1, pos = get_price(data, pos)
+            ask_vol1, pos = get_price(data, pos)
+            bid2, pos = get_price(data, pos)
+            ask2, pos = get_price(data, pos)
+            bid_vol2, pos = get_price(data, pos)
+            ask_vol2, pos = get_price(data, pos)
+            bid3, pos = get_price(data, pos)
+            ask3, pos = get_price(data, pos)
+            bid_vol3, pos = get_price(data, pos)
+            ask_vol3, pos = get_price(data, pos)
+            bid4, pos = get_price(data, pos)
+            ask4, pos = get_price(data, pos)
+            bid_vol4, pos = get_price(data, pos)
+            ask_vol4, pos = get_price(data, pos)
+            bid5, pos = get_price(data, pos)
+            ask5, pos = get_price(data, pos)
+            bid_vol5, pos = get_price(data, pos)
+            ask_vol5, pos = get_price(data, pos)
+            (reversed_bytes4,) = struct.unpack("<H", data[pos:pos+2])
+            pos += 2
+            reversed_bytes5, pos = get_price(data, pos)
+            reversed_bytes6, pos = get_price(data, pos)
+            reversed_bytes7, pos = get_price(data, pos)
+            reversed_bytes8, pos = get_price(data, pos)
+            reversed_bytes9, active2 = struct.unpack("<hH", data[pos:pos+4])
+            pos += 4
+            code_str = code.decode("utf-8")
+            one_stock = {
+                "market": market, "code": code_str, "active1": active1,
+                "price": _cal_price(price, 0, coefficient),
+                "last_close": _cal_price(price, last_close_diff, coefficient),
+                "open": _cal_price(price, open_diff, coefficient),
+                "high": _cal_price(price, high_diff, coefficient),
+                "low": _cal_price(price, low_diff, coefficient),
+                "servertime": reversed_bytes0,
+                "vol": vol, "cur_vol": cur_vol, "amount": amount,
+                "s_vol": s_vol, "b_vol": b_vol,
+                "bid1": _cal_price(price, bid1, coefficient),
+                "ask1": _cal_price(price, ask1, coefficient),
+                "bid_vol1": bid_vol1, "ask_vol1": ask_vol1,
+                "bid2": _cal_price(price, bid2, coefficient),
+                "ask2": _cal_price(price, ask2, coefficient),
+                "bid_vol2": bid_vol2, "ask_vol2": ask_vol2,
+                "bid3": _cal_price(price, bid3, coefficient),
+                "ask3": _cal_price(price, ask3, coefficient),
+                "bid_vol3": bid_vol3, "ask_vol3": ask_vol3,
+                "bid4": _cal_price(price, bid4, coefficient),
+                "ask4": _cal_price(price, ask4, coefficient),
+                "bid_vol4": bid_vol4, "ask_vol4": ask_vol4,
+                "bid5": _cal_price(price, bid5, coefficient),
+                "ask5": _cal_price(price, ask5, coefficient),
+                "bid_vol5": bid_vol5, "ask_vol5": ask_vol5,
+                "reversed_bytes9": reversed_bytes9 / 100.0,
+                "active2": active2,
+            }
+            stocks.append(one_stock)
+    except (IndexError, struct.error):
+        pass
     return stocks
 
 def _cal_price(base_p, diff, coefficient=0.01):
@@ -574,45 +579,45 @@ def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 
     pre_diff_base = 0
 
     for i in range(ret_count):
-        year, month, day, hour, minute, pos = _get_datetime(category, data, pos)
-        price_open_diff, pos = get_price(data, pos)
-        price_close_diff, pos = get_price(data, pos)
-        price_high_diff, pos = get_price(data, pos)
-        price_low_diff, pos = get_price(data, pos)
-        (vol_raw,) = struct.unpack("<I", data[pos:pos+4])
-        vol = decode_volume(vol_raw)
-        pos += 4
-        (db_vol_raw,) = struct.unpack("<I", data[pos:pos+4])
-        db_vol = decode_volume(db_vol_raw)
-        pos += 4
-
-        # 指数记录额外 4 字节：上涨家数 + 下跌家数（各 uint16 LE）
-        if is_idx:
+        try:
+            year, month, day, hour, minute, pos = _get_datetime(category, data, pos)
+            price_open_diff, pos = get_price(data, pos)
+            price_close_diff, pos = get_price(data, pos)
+            price_high_diff, pos = get_price(data, pos)
+            price_low_diff, pos = get_price(data, pos)
+            (vol_raw,) = struct.unpack("<I", data[pos:pos+4])
+            vol = decode_volume(vol_raw)
+            pos += 4
+            (db_vol_raw,) = struct.unpack("<I", data[pos:pos+4])
+            db_vol = decode_volume(db_vol_raw)
             pos += 4
 
-        open_ = _cal_price1000(price_open_diff, pre_diff_base)
-        price_open_diff = price_open_diff + pre_diff_base
-        close = _cal_price1000(price_open_diff, price_close_diff)
-        high = _cal_price1000(price_open_diff, price_high_diff)
-        low = _cal_price1000(price_open_diff, price_low_diff)
-        pre_diff_base = price_open_diff + price_close_diff
+            if is_idx:
+                pos += 4
 
-        # vol 语义修正
-        if is_idx and category in _MINUTE_CATS:
-            vol = float("nan")
-        elif category in _WEEK_PLUS_CATS:
-            vol *= 100.0
+            open_ = _cal_price1000(price_open_diff, pre_diff_base)
+            price_open_diff = price_open_diff + pre_diff_base
+            close = _cal_price1000(price_open_diff, price_close_diff)
+            high = _cal_price1000(price_open_diff, price_high_diff)
+            low = _cal_price1000(price_open_diff, price_low_diff)
+            pre_diff_base = price_open_diff + price_close_diff
 
-        kline = {
-            "open": open_, "close": close, "high": high, "low": low,
-            "vol": vol, "amount": db_vol,
-            "year": year, "month": month, "day": day,
-            "hour": hour, "minute": minute,
-            "datetime": f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}",
-        }
-        # 过滤服务器返回的非法日期行（无效股票代码时服务器可能返回 buffer 残留垃圾数据）
-        if 1 <= month <= 12 and 1 <= day <= 31 and 2000 <= year <= 2100 and open_ > 0:
-            klines.append(kline)
+            if is_idx and category in _MINUTE_CATS:
+                vol = float("nan")
+            elif category in _WEEK_PLUS_CATS:
+                vol *= 100.0
+
+            kline = {
+                "open": open_, "close": close, "high": high, "low": low,
+                "vol": vol, "amount": db_vol,
+                "year": year, "month": month, "day": day,
+                "hour": hour, "minute": minute,
+                "datetime": f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}",
+            }
+            if 1 <= month <= 12 and 1 <= day <= 31 and 1990 <= year <= 2100 and open_ > 0:
+                klines.append(kline)
+        except (IndexError, struct.error):
+            break
     return klines
 
 def _cal_price1000(base_p, diff):
@@ -643,12 +648,21 @@ def _p_today_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
     响应格式: 固定头(11B) + 变长额外头 + 数据区(num条×3个varint).
     通过解析全部varint后从尾部取 num*3 个来定位数据起始.
     """
+    if len(data) < 2:
+        return []
     (num,) = struct.unpack("<H", data[:2])
+    if num <= 0:
+        return []
     pos = 0
     vals = []
-    while pos < len(data):
-        v, pos = get_price(data, pos)
-        vals.append(v)
+    try:
+        while pos < len(data):
+            v, pos = get_price(data, pos)
+            vals.append(v)
+    except IndexError:
+        pass
+    if num * 3 > len(vals):
+        return []
     start = len(vals) - num * 3
     last_price = 0
     prices = []
@@ -664,71 +678,86 @@ def _p_today_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
 
 def _p_today_trade(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetTransactionData.parseResponse."""
+    if len(data) < 2:
+        return []
     pos = 0
     (num,) = struct.unpack("<H", data[:2])
     pos += 2
     ticks = []
     last_price = 0
-    for _ in range(num):
-        (minutes,) = struct.unpack("<H", data[pos:pos+2]); pos += 2
-        hour = int(minutes / 60)
-        minute = minutes % 60
-        price_raw, pos = get_price(data, pos)
-        vol, pos = get_price(data, pos)
-        num_orders, pos = get_price(data, pos)
-        buy_or_sell, pos = get_price(data, pos)
-        _, pos = get_price(data, pos)
-        last_price = last_price + price_raw
-        ticks.append({
-            "time": f"{hour:02d}:{minute:02d}",
-            "price": float(last_price) * coefficient,
-            "vol": vol,
-            "num": num_orders,
-            "buyorsell": buy_or_sell,
-        })
+    try:
+        for _ in range(num):
+            (minutes,) = struct.unpack("<H", data[pos:pos+2]); pos += 2
+            hour = int(minutes / 60)
+            minute = minutes % 60
+            price_raw, pos = get_price(data, pos)
+            vol, pos = get_price(data, pos)
+            num_orders, pos = get_price(data, pos)
+            buy_or_sell, pos = get_price(data, pos)
+            _, pos = get_price(data, pos)
+            last_price = last_price + price_raw
+            ticks.append({
+                "time": f"{hour:02d}:{minute:02d}",
+                "price": float(last_price) * coefficient,
+                "vol": vol,
+                "num": num_orders,
+                "buyorsell": buy_or_sell,
+            })
+    except (IndexError, struct.error):
+        pass
     return ticks
 
 def _p_history_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetHistoryMinuteTimeData.parseResponse."""
+    if len(data) < 2:
+        return []
     pos = 0
     (num,) = struct.unpack("<H", data[:2])
     last_price = 0
     pos += 6
     prices = []
-    for _ in range(num):
-        price_raw, pos = get_price(data, pos)
-        _, pos = get_price(data, pos)
-        vol, pos = get_price(data, pos)
-        last_price = last_price + price_raw
-        prices.append({
-            "price": float(last_price) * coefficient,
-            "vol": vol,
-        })
+    try:
+        for _ in range(num):
+            price_raw, pos = get_price(data, pos)
+            _, pos = get_price(data, pos)
+            vol, pos = get_price(data, pos)
+            last_price = last_price + price_raw
+            prices.append({
+                "price": float(last_price) * coefficient,
+                "vol": vol,
+            })
+    except (IndexError, struct.error):
+        pass
     return prices
 
 def _p_history_trade(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetHistoryTransactionData.parseResponse."""
+    if len(data) < 2:
+        return []
     pos = 0
     (num,) = struct.unpack("<H", data[:2])
     pos += 2
     pos += 4  # skip 4 bytes
     last_price = 0
     ticks = []
-    for _ in range(num):
-        (minutes,) = struct.unpack("<H", data[pos:pos+2]); pos += 2
-        hour = int(minutes / 60)
-        minute = minutes % 60
-        price_raw, pos = get_price(data, pos)
-        vol, pos = get_price(data, pos)
-        buy_or_sell, pos = get_price(data, pos)
-        _, pos = get_price(data, pos)
-        last_price = last_price + price_raw
-        ticks.append({
-            "time": f"{hour:02d}:{minute:02d}",
-            "price": float(last_price) * coefficient,
-            "vol": vol,
-            "buyorsell": buy_or_sell,
-        })
+    try:
+        for _ in range(num):
+            (minutes,) = struct.unpack("<H", data[pos:pos+2]); pos += 2
+            hour = int(minutes / 60)
+            minute = minutes % 60
+            price_raw, pos = get_price(data, pos)
+            vol, pos = get_price(data, pos)
+            buy_or_sell, pos = get_price(data, pos)
+            _, pos = get_price(data, pos)
+            last_price = last_price + price_raw
+            ticks.append({
+                "time": f"{hour:02d}:{minute:02d}",
+                "price": float(last_price) * coefficient,
+                "vol": vol,
+                "buyorsell": buy_or_sell,
+            })
+    except (IndexError, struct.error):
+        pass
     return ticks
 
 def _p_xdxr(data: bytes) -> list[dict]:
@@ -1067,28 +1096,33 @@ def _p_quotes_detail(data: bytes, coefficient: float = 0.01) -> list[dict]:
 
 def _p_tick_chart(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """分时明细 — 对齐 pytdx GetTransactionData 响应格式."""
+    if len(data) < 2:
+        return []
     pos = 0
     (num,) = struct.unpack("<H", data[:2])
     pos += 2
     result = []
     last_price = 0
-    for _ in range(num):
-        (minutes,) = struct.unpack("<H", data[pos:pos+2]); pos += 2
-        hour = int(minutes / 60)
-        minute = minutes % 60
-        price_raw, pos = get_price(data, pos)
-        vol, pos = get_price(data, pos)
-        num_orders, pos = get_price(data, pos)
-        buy_or_sell, pos = get_price(data, pos)
-        _, pos = get_price(data, pos)
-        last_price = last_price + price_raw
-        result.append({
-            "time": f"{hour:02d}:{minute:02d}",
-            "price": float(last_price) / 100,
-            "vol": vol,
-            "num": num_orders,
-            "buyorsell": buy_or_sell,
-        })
+    try:
+        for _ in range(num):
+            (minutes,) = struct.unpack("<H", data[pos:pos+2]); pos += 2
+            hour = int(minutes / 60)
+            minute = minutes % 60
+            price_raw, pos = get_price(data, pos)
+            vol, pos = get_price(data, pos)
+            num_orders, pos = get_price(data, pos)
+            buy_or_sell, pos = get_price(data, pos)
+            _, pos = get_price(data, pos)
+            last_price = last_price + price_raw
+            result.append({
+                "time": f"{hour:02d}:{minute:02d}",
+                "price": float(last_price) * coefficient,
+                "vol": vol,
+                "num": num_orders,
+                "buyorsell": buy_or_sell,
+            })
+    except (IndexError, struct.error):
+        pass
     return result
 
 def _p_auction(data: bytes) -> list[dict]:
@@ -1225,6 +1259,60 @@ def _p_unusual(data: bytes) -> list[dict]:
             "flag": flag,
         })
     return results
+
+
+# 市场异动 (0x1237 / CMD_UNUSUAL) 类型码映射
+# 来源: easy_tdx v1.27.2 实测锚定（全天跟踪 17848 条采样）
+UNUSUAL_TYPE_NAMES: dict[int, str] = {
+    0x00: "开盘集合竞价拉升",
+    0x01: "开盘集合竞价下跌",
+    0x02: "5分钟涨幅",
+    0x03: "5分钟跌幅",
+    0x04: "加速拉升",
+    0x05: "加速下跌",
+    0x06: "瞬间拉升",
+    0x07: "瞬间下跌",
+    0x08: "连续大单买入",
+    0x09: "连续大单卖出",
+    0x0A: "大笔买入",
+    0x0B: "大笔卖出",
+    0x0C: "主力急入",
+    0x0D: "主力急出",
+    0x0E: "涨停板打开",
+    0x0F: "跌停板打开",
+    0x10: "量比放大",
+    0x11: "量比缩小",
+    0x12: "突破新高",
+    0x13: "竞价试买",
+    0x14: "竞价试卖",
+    0x15: "竞价异动",
+    0x16: "盘中强势",
+    0x1D: "急速拉升",
+    0x1E: "急速下跌",
+}
+
+
+def describe_unusual(unusual_type: int, v1: int = 0, v2: int = 0, v3: int = 0) -> str:
+    """将异动类型码转为可读描述。
+
+    Args:
+        unusual_type: 类型码（0x00 ~ 0x1E）
+        v1, v2, v3: 附加数值（各类型含义不同）
+
+    Returns:
+        可读描述字符串
+    """
+    name = UNUSUAL_TYPE_NAMES.get(unusual_type, f"未知类型0x{unusual_type:02X}")
+    if unusual_type == 0x13:
+        direction = "买" if v1 == 0 else "卖"
+        return f"竞价试{direction}（申报价={v2}, 竞价量={v3}手）"
+    if unusual_type == 0x15:
+        return f"竞价异动（方向档={v1}, 尾段变动={v2}, 成交量={v3}手）"
+    if unusual_type == 0x16:
+        return f"盘中强势（等级={v1}）"
+    if unusual_type in (0x1D, 0x1E):
+        return f"{name}（幅度={v1}%）"
+    return name
 
 def _p_chart_sampling_kline(data: bytes) -> list[float]:
     """K线采样."""

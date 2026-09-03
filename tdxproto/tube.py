@@ -54,12 +54,18 @@ class Tube:
         last_err = None
         for host in candidates:
             try:
+                self._stop.set()
+                for t in (self._reader, self._heartbeater):
+                    if t and t.is_alive() and t is not threading.current_thread():
+                        t.join(timeout=0.3)
+                self._reader = None
+                self._heartbeater = None
                 addr, port = host.rsplit(":", 1)
                 sock = socket.create_connection((addr, int(port)), self.timeout)
                 sock.settimeout(self.timeout)
                 self._sock = sock
                 self._host = host
-                self._stop.clear()
+                self._stop = threading.Event()
                 self._start_reader()
                 self._start_heartbeater(prefix)
                 self.call(handshake_cmd, handshake_data, prefix)
@@ -123,9 +129,10 @@ class Tube:
                 self._pending.pop(mid, None)
 
     def _next_mid(self) -> int:
-        v = self._mid
-        self._mid = 1 if v >= 0xFFFF else v + 1
-        return v
+        with self._plock:
+            v = self._mid
+            self._mid = 1 if v >= 0xFFFF else v + 1
+            return v
 
     def _start_reader(self):
         if self._reader and self._reader.is_alive():
@@ -136,6 +143,8 @@ class Tube:
 
     def _start_heartbeater(self, prefix: int):
         if not self._heartbeat_cmd or self._heartbeat_interval <= 0:
+            return
+        if self._heartbeater and self._heartbeater.is_alive():
             return
         t = threading.Thread(target=self._hb_loop, args=(prefix,), daemon=True)
         self._heartbeater = t

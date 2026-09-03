@@ -12,7 +12,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 31.8
+    "avg_handshake_ms": 31.8,
+    "_total_latency_sum": 31.8
   },
   "82.156.214.79:7709": {
     "host": "82.156.214.79:7709",
@@ -27,7 +28,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 32.12
+    "avg_handshake_ms": 32.12,
+    "_total_latency_sum": 32.12
   },
   "101.42.164.241:7709": {
     "host": "101.42.164.241:7709",
@@ -42,7 +44,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 32.64
+    "avg_handshake_ms": 32.64,
+    "_total_latency_sum": 32.64
   },
   "101.42.240.54:7709": {
     "host": "101.42.240.54:7709",
@@ -57,7 +60,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 33.7
+    "avg_handshake_ms": 33.7,
+    "_total_latency_sum": 33.7
   },
   "101.43.159.194:7709": {
     "host": "101.43.159.194:7709",
@@ -72,7 +76,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 34.32
+    "avg_handshake_ms": 34.32,
+    "_total_latency_sum": 34.32
   },
   "62.234.50.143:7709": {
     "host": "62.234.50.143:7709",
@@ -87,7 +92,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 34.73
+    "avg_handshake_ms": 34.73,
+    "_total_latency_sum": 34.73
   },
   "120.53.8.251:7709": {
     "host": "120.53.8.251:7709",
@@ -102,7 +108,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 35.75
+    "avg_handshake_ms": 35.75,
+    "_total_latency_sum": 35.75
   },
   "152.136.191.169:7709": {
     "host": "152.136.191.169:7709",
@@ -117,7 +124,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 35.78
+    "avg_handshake_ms": 35.78,
+    "_total_latency_sum": 35.78
   },
   "82.156.174.84:7709": {
     "host": "82.156.174.84:7709",
@@ -132,7 +140,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 36.51
+    "avg_handshake_ms": 36.51,
+    "_total_latency_sum": 36.51
   },
   "81.70.151.186:7709": {
     "host": "81.70.151.186:7709",
@@ -147,7 +156,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 38.17
+    "avg_handshake_ms": 38.17,
+    "_total_latency_sum": 38.17
   },
   "123.60.84.66:7709": {
     "host": "123.60.84.66:7709",
@@ -162,7 +172,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 94.77
+    "avg_handshake_ms": 94.77,
+    "_total_latency_sum": 94.77
   },
   "124.70.199.56:7709": {
     "host": "124.70.199.56:7709",
@@ -177,7 +188,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 97.06
+    "avg_handshake_ms": 97.06,
+    "_total_latency_sum": 97.06
   },
   "119.97.185.59:7709": {
     "host": "119.97.185.59:7709",
@@ -192,7 +204,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 99.19
+    "avg_handshake_ms": 99.19,
+    "_total_latency_sum": 99.19
   },
   "124.70.133.119:7709": {
     "host": "124.70.133.119:7709",
@@ -207,7 +220,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 101.24
+    "avg_handshake_ms": 101.24,
+    "_total_latency_sum": 101.24
   },
   "123.60.70.228:7709": {
     "host": "123.60.70.228:7709",
@@ -222,7 +236,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 101.53
+    "avg_handshake_ms": 101.53,
+    "_total_latency_sum": 101.53
   },
   "123.60.164.122:7709": {
     "host": "123.60.164.122:7709",
@@ -237,7 +252,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 102.6
+    "avg_handshake_ms": 102.6,
+    "_total_latency_sum": 102.6
   },
   "124.71.187.72:7709": {
     "host": "124.71.187.72:7709",
@@ -252,7 +268,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 102.62
+    "avg_handshake_ms": 102.62,
+    "_total_latency_sum": 102.62
   },
   "122.51.120.217:7709": {
     "host": "122.51.120.217:7709",
@@ -267,7 +284,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 102.92
+    "avg_handshake_ms": 102.92,
+    "_total_latency_sum": 102.92
   },
   "123.60.73.44:7709": {
     "host": "123.60.73.44:7709",
@@ -282,7 +300,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 104.98
+    "avg_handshake_ms": 104.98,
+    "_total_latency_sum": 104.98
   },
   "121.36.225.169:7709": {
     "host": "121.36.225.169:7709",
@@ -297,7 +316,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 106.11
+    "avg_handshake_ms": 106.11,
+    "_total_latency_sum": 106.11
   },
   "101.35.121.35:7709": {
     "host": "101.35.121.35:7709",
@@ -312,7 +332,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 106.29
+    "avg_handshake_ms": 106.29,
+    "_total_latency_sum": 106.29
   },
   "122.51.232.182:7709": {
     "host": "122.51.232.182:7709",
@@ -327,7 +348,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 106.57
+    "avg_handshake_ms": 106.57,
+    "_total_latency_sum": 106.57
   },
   "111.229.247.189:7709": {
     "host": "111.229.247.189:7709",
@@ -342,7 +364,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 107.22
+    "avg_handshake_ms": 107.22,
+    "_total_latency_sum": 107.22
   },
   "118.25.98.114:7709": {
     "host": "118.25.98.114:7709",
@@ -357,7 +380,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 107.74
+    "avg_handshake_ms": 107.74,
+    "_total_latency_sum": 107.74
   },
   "150.158.160.2:7709": {
     "host": "150.158.160.2:7709",
@@ -372,7 +396,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 107.92
+    "avg_handshake_ms": 107.92,
+    "_total_latency_sum": 107.92
   },
   "124.71.187.122:7709": {
     "host": "124.71.187.122:7709",
@@ -387,7 +412,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 118.72
+    "avg_handshake_ms": 118.72,
+    "_total_latency_sum": 118.72
   },
   "111.231.113.208:7709": {
     "host": "111.231.113.208:7709",
@@ -402,7 +428,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 122.63
+    "avg_handshake_ms": 122.63,
+    "_total_latency_sum": 122.63
   },
   "43.139.18.171:7709": {
     "host": "43.139.18.171:7709",
@@ -417,7 +444,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 133.0
+    "avg_handshake_ms": 133.0,
+    "_total_latency_sum": 133.0
   },
   "116.205.171.132:7709": {
     "host": "116.205.171.132:7709",
@@ -432,7 +460,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 133.61
+    "avg_handshake_ms": 133.61,
+    "_total_latency_sum": 133.61
   },
   "110.41.2.72:7709": {
     "host": "110.41.2.72:7709",
@@ -447,7 +476,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 134.95
+    "avg_handshake_ms": 134.95,
+    "_total_latency_sum": 134.95
   },
   "159.75.29.111:7709": {
     "host": "159.75.29.111:7709",
@@ -462,7 +492,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 136.97
+    "avg_handshake_ms": 136.97,
+    "_total_latency_sum": 136.97
   },
   "175.178.112.197:7709": {
     "host": "175.178.112.197:7709",
@@ -477,7 +508,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 139.15
+    "avg_handshake_ms": 139.15,
+    "_total_latency_sum": 139.15
   },
   "124.223.163.242:7709": {
     "host": "124.223.163.242:7709",
@@ -492,7 +524,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 151.23
+    "avg_handshake_ms": 151.23,
+    "_total_latency_sum": 151.23
   },
   "111.230.186.52:7709": {
     "host": "111.230.186.52:7709",
@@ -507,7 +540,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 152.83
+    "avg_handshake_ms": 152.83,
+    "_total_latency_sum": 152.83
   },
   "175.178.128.227:7709": {
     "host": "175.178.128.227:7709",
@@ -522,7 +556,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 153.33
+    "avg_handshake_ms": 153.33,
+    "_total_latency_sum": 153.33
   },
   "116.205.163.254:7709": {
     "host": "116.205.163.254:7709",
@@ -537,7 +572,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 155.02
+    "avg_handshake_ms": 155.02,
+    "_total_latency_sum": 155.02
   },
   "116.205.183.150:7709": {
     "host": "116.205.183.150:7709",
@@ -552,7 +588,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 157.0
+    "avg_handshake_ms": 157.0,
+    "_total_latency_sum": 157.0
   },
   "43.139.95.83:7709": {
     "host": "43.139.95.83:7709",
@@ -567,7 +604,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 162.14
+    "avg_handshake_ms": 162.14,
+    "_total_latency_sum": 162.14
   },
   "110.41.147.114:7709": {
     "host": "110.41.147.114:7709",
@@ -582,7 +620,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 167.97
+    "avg_handshake_ms": 167.97,
+    "_total_latency_sum": 167.97
   },
   "101.33.225.16:7709": {
     "host": "101.33.225.16:7709",
@@ -597,7 +636,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 178.16
+    "avg_handshake_ms": 178.16,
+    "_total_latency_sum": 178.16
   },
   "129.204.230.128:7709": {
     "host": "129.204.230.128:7709",
@@ -612,67 +652,72 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 1.0,
-    "avg_handshake_ms": 181.13
+    "avg_handshake_ms": 181.13,
+    "_total_latency_sum": 181.13
   },
   "116.205.143.214:7727": {
     "host": "116.205.143.214:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 1.6,
+    "tcp_latency_ms": 0.65,
     "handshake_ok": true,
-    "handshake_latency_ms": 87.05,
+    "handshake_latency_ms": 88.6,
     "status": "ok",
-    "last_check": 1783922346.5411541,
+    "last_check": 1788355932.11126,
     "consecutive_failures": 0,
-    "total_checks": 58,
-    "success_rate": 1.0,
-    "avg_handshake_ms": 64.62844827586207
+    "total_checks": 122,
+    "success_rate": 0.9918032786885246,
+    "avg_handshake_ms": 77.78221311475411,
+    "_total_latency_sum": 9489.430000000002
   },
   "150.158.9.199:7727": {
     "host": "150.158.9.199:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 1.09,
-    "handshake_ok": false,
-    "handshake_latency_ms": 81.99,
-    "status": "down",
-    "last_check": 1783922346.3221626,
-    "consecutive_failures": 41,
-    "total_checks": 42,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.34,
+    "handshake_ok": true,
+    "handshake_latency_ms": 75.79,
+    "status": "ok",
+    "last_check": 1788355932.1112494,
+    "consecutive_failures": 0,
+    "total_checks": 106,
+    "success_rate": 0.6037735849056601,
+    "avg_handshake_ms": 40.31528301886793,
+    "_total_latency_sum": 4273.420000000001
   },
   "112.74.214.43:7727": {
     "host": "112.74.214.43:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 2.16,
-    "handshake_ok": false,
-    "handshake_latency_ms": 85.83,
-    "status": "down",
-    "last_check": 1783922346.3221617,
-    "consecutive_failures": 41,
-    "total_checks": 42,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 3.48,
+    "handshake_ok": true,
+    "handshake_latency_ms": 81.83,
+    "status": "ok",
+    "last_check": 1788355932.1112556,
+    "consecutive_failures": 0,
+    "total_checks": 106,
+    "success_rate": 0.6037735849056601,
+    "avg_handshake_ms": 47.545849056603764,
+    "_total_latency_sum": 5039.859999999999
   },
   "124.71.223.19:7727": {
     "host": "124.71.223.19:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 1.25,
-    "handshake_ok": false,
-    "handshake_latency_ms": 88.64,
-    "status": "down",
-    "last_check": 1783922346.322171,
-    "consecutive_failures": 41,
-    "total_checks": 42,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.48,
+    "handshake_ok": true,
+    "handshake_latency_ms": 90.14,
+    "status": "ok",
+    "last_check": 1788355932.1112607,
+    "consecutive_failures": 0,
+    "total_checks": 106,
+    "success_rate": 0.6037735849056601,
+    "avg_handshake_ms": 51.817452830188685,
+    "_total_latency_sum": 5492.650000000001
   },
   "114.80.149.28:7727": {
     "host": "114.80.149.28:7727",
@@ -687,7 +732,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "124.70.130.23:7727": {
     "host": "124.70.130.23:7727",
@@ -702,7 +748,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "47.102.42.226:7727": {
     "host": "47.102.42.226:7727",
@@ -717,7 +764,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "119.97.185.53:7727": {
     "host": "119.97.185.53:7727",
@@ -732,7 +780,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "47.96.148.223:7727": {
     "host": "47.96.148.223:7727",
@@ -747,7 +796,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "120.55.44.11:7727": {
     "host": "120.55.44.11:7727",
@@ -762,7 +812,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "119.147.86.171:7727": {
     "host": "119.147.86.171:7727",
@@ -777,7 +828,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "47.108.219.138:7727": {
     "host": "47.108.219.138:7727",
@@ -792,7 +844,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "119.3.48.50:7727": {
     "host": "119.3.48.50:7727",
@@ -807,7 +860,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "139.9.57.123:7727": {
     "host": "139.9.57.123:7727",
@@ -822,7 +876,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "106.52.74.235:7727": {
     "host": "106.52.74.235:7727",
@@ -837,7 +892,8 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "39.106.145.169:7727": {
     "host": "39.106.145.169:7727",
@@ -852,186 +908,231 @@
     "consecutive_failures": 0,
     "total_checks": 1,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   },
   "150.158.20.127:7727": {
     "host": "150.158.20.127:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.31,
-    "handshake_ok": false,
-    "handshake_latency_ms": 80.3,
-    "status": "down",
-    "last_check": 1783922346.3221607,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.42,
+    "handshake_ok": true,
+    "handshake_latency_ms": 59.77,
+    "status": "ok",
+    "last_check": 1788355932.1112485,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 37.380190476190464,
+    "_total_latency_sum": 3924.9199999999987
   },
   "175.24.47.69:7727": {
     "host": "175.24.47.69:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 1.69,
-    "handshake_ok": false,
-    "handshake_latency_ms": 68.38,
-    "status": "down",
-    "last_check": 1783922346.3221583,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.33,
+    "handshake_ok": true,
+    "handshake_latency_ms": 59.76,
+    "status": "ok",
+    "last_check": 1788355932.1112473,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 39.06209523809523,
+    "_total_latency_sum": 4101.5199999999995
   },
   "49.235.119.116:7727": {
     "host": "49.235.119.116:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 1.24,
-    "handshake_ok": false,
-    "handshake_latency_ms": 71.29,
-    "status": "down",
-    "last_check": 1783922346.3221595,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.17,
+    "handshake_ok": true,
+    "handshake_latency_ms": 78.86,
+    "status": "ok",
+    "last_check": 1788355932.1112502,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 41.320952380952384,
+    "_total_latency_sum": 4338.700000000001
   },
   "49.234.13.160:7727": {
     "host": "49.234.13.160:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 1.27,
-    "handshake_ok": false,
-    "handshake_latency_ms": 83.41,
-    "status": "down",
-    "last_check": 1783922346.3221693,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.3,
+    "handshake_ok": true,
+    "handshake_latency_ms": 81.53,
+    "status": "ok",
+    "last_check": 1788355932.111251,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 39.85047619047619,
+    "_total_latency_sum": 4184.3
   },
   "139.9.191.175:7727": {
     "host": "139.9.191.175:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 1.19,
-    "handshake_ok": false,
-    "handshake_latency_ms": 98.18,
-    "status": "down",
-    "last_check": 1783922346.3221736,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 2.22,
+    "handshake_ok": true,
+    "handshake_latency_ms": 91.53,
+    "status": "ok",
+    "last_check": 1788355932.1112623,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.5142857142857142,
+    "avg_handshake_ms": 72.79561904761906,
+    "_total_latency_sum": 7643.540000000001
   },
   "123.60.173.210:7727": {
     "host": "123.60.173.210:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.44,
-    "handshake_ok": false,
-    "handshake_latency_ms": 66.6,
-    "status": "down",
-    "last_check": 1783922346.3221562,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.23,
+    "handshake_ok": true,
+    "handshake_latency_ms": 54.15,
+    "status": "ok",
+    "last_check": 1788355933.053269,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.5904761904761904,
+    "avg_handshake_ms": 37.78799999999999,
+    "_total_latency_sum": 3967.739999999999
   },
   "43.139.173.246:7727": {
     "host": "43.139.173.246:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.98,
-    "handshake_ok": false,
-    "handshake_latency_ms": 86.39,
-    "status": "down",
-    "last_check": 1783922346.3221674,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 2.38,
+    "handshake_ok": true,
+    "handshake_latency_ms": 96.16,
+    "status": "ok",
+    "last_check": 1788355932.1112628,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 56.198571428571434,
+    "_total_latency_sum": 5900.85
   },
   "118.89.69.202:7727": {
     "host": "118.89.69.202:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.37,
-    "handshake_ok": false,
-    "handshake_latency_ms": 84.1,
-    "status": "down",
-    "last_check": 1783922346.32217,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.14,
+    "handshake_ok": true,
+    "handshake_latency_ms": 56.01,
+    "status": "ok",
+    "last_check": 1788355932.111246,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 39.54304761904761,
+    "_total_latency_sum": 4152.0199999999995
   },
   "120.25.218.6:7727": {
     "host": "120.25.218.6:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.85,
-    "handshake_ok": false,
-    "handshake_latency_ms": 95.72,
-    "status": "down",
-    "last_check": 1783922346.3221714,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 2.95,
+    "handshake_ok": true,
+    "handshake_latency_ms": 226.01,
+    "status": "degraded",
+    "last_check": 1788355932.1112635,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.5619047619047619,
+    "avg_handshake_ms": 62.45133333333334,
+    "_total_latency_sum": 6557.39
   },
   "113.45.175.47:7727": {
     "host": "113.45.175.47:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.78,
-    "handshake_ok": false,
-    "handshake_latency_ms": 92.73,
-    "status": "down",
-    "last_check": 1783922346.3221724,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 0.4,
+    "handshake_ok": true,
+    "handshake_latency_ms": 90.21,
+    "status": "ok",
+    "last_check": 1788355932.1112611,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 55.092000000000006,
+    "_total_latency_sum": 5784.660000000001
   },
   "159.75.90.107:7727": {
     "host": "159.75.90.107:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.31,
-    "handshake_ok": false,
-    "handshake_latency_ms": 95.65,
-    "status": "down",
-    "last_check": 1783922346.322172,
-    "consecutive_failures": 40,
-    "total_checks": 41,
-    "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "tcp_latency_ms": 2.11,
+    "handshake_ok": true,
+    "handshake_latency_ms": 82.05,
+    "status": "ok",
+    "last_check": 1788355932.1112585,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 55.54914285714286,
+    "_total_latency_sum": 5832.660000000001
   },
   "106.52.170.195:7727": {
     "host": "106.52.170.195:7727",
     "port": 7727,
     "protocol": "7727",
     "tcp_ok": true,
-    "tcp_latency_ms": 0.48,
-    "handshake_ok": false,
-    "handshake_latency_ms": 96.46,
-    "status": "down",
-    "last_check": 1783922346.322173,
-    "consecutive_failures": 40,
-    "total_checks": 41,
+    "tcp_latency_ms": 2.62,
+    "handshake_ok": true,
+    "handshake_latency_ms": 91.48,
+    "status": "ok",
+    "last_check": 1788355932.1112616,
+    "consecutive_failures": 0,
+    "total_checks": 105,
+    "success_rate": 0.6095238095238094,
+    "avg_handshake_ms": 57.76247619047619,
+    "_total_latency_sum": 6065.06
+  },
+  "218.106.92.182:7709": {
+    "host": "218.106.92.182:7709",
+    "port": 7709,
+    "protocol": "7709",
+    "tcp_ok": true,
+    "tcp_latency_ms": 0.0,
+    "handshake_ok": true,
+    "handshake_latency_ms": 0.0,
+    "status": "ok",
+    "last_check": 0.0,
+    "consecutive_failures": 0,
+    "total_checks": 0,
     "success_rate": 0.0,
-    "avg_handshake_ms": 0.0
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
+  },
+  "180.153.18.170:7709": {
+    "host": "180.153.18.170:7709",
+    "port": 7709,
+    "protocol": "7709",
+    "tcp_ok": true,
+    "tcp_latency_ms": 0.0,
+    "handshake_ok": true,
+    "handshake_latency_ms": 0.0,
+    "status": "ok",
+    "last_check": 0.0,
+    "consecutive_failures": 0,
+    "total_checks": 0,
+    "success_rate": 0.0,
+    "avg_handshake_ms": 0.0,
+    "_total_latency_sum": 0.0
   }
 }

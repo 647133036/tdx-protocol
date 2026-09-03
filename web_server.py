@@ -4,7 +4,8 @@
 import json
 import threading
 from dataclasses import is_dataclass, asdict
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import re
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from tdxproto.stock import StockClient
@@ -60,6 +61,16 @@ def dc_to_dict(obj):
     if is_dataclass(obj) and not isinstance(obj, type):
         return asdict(obj)
     return str(obj)
+
+
+_CODE_RE = re.compile(r"^[A-Za-z0-9]{1,12}$")
+
+
+def _safe_code(raw: str, default: str = "sh600000") -> str:
+    s = (raw or "").strip()
+    if _CODE_RE.match(s):
+        return s
+    return default
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -127,7 +138,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode("utf-8"))
 
     def _handle_status(self):
-        self._send_json({"status": "ok", "connected": True})
+        connected = _client is not None and getattr(_client, "sock", None) is not None
+        self._send_json({"status": "ok", "connected": connected})
 
     @_retry_on_conn_error
     def _handle_count(self):
@@ -139,7 +151,7 @@ class Handler(BaseHTTPRequestHandler):
     @_retry_on_conn_error
     def _handle_quote(self):
         params = parse_qs(urlparse(self.path).query)
-        code = params.get("code", ["sh600000"])[0]
+        code = _safe_code(params.get("code", ["sh600000"])[0])
         c = get_client()
         q = c.quote(code)
         self._send_json({"code": code, "quote": q})
@@ -149,11 +161,11 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if body:
                 data = json.loads(body)
-                code = data.get("code", "sh600000")
+                code = _safe_code(data.get("code", "sh600000"))
                 period = data.get("period", "day")
             else:
                 params = parse_qs(urlparse(self.path).query)
-                code = params.get("code", ["sh600000"])[0]
+                code = _safe_code(params.get("code", ["sh600000"])[0])
                 period = params.get("period", ["day"])[0]
 
             c = get_client()
@@ -183,10 +195,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if body:
                 data = json.loads(body)
-                code = data.get("code", "sh600000")
+                code = _safe_code(data.get("code", "sh600000"))
             else:
                 params = parse_qs(urlparse(self.path).query)
-                code = params.get("code", ["sh600000"])[0]
+                code = _safe_code(params.get("code", ["sh600000"])[0])
 
             c = get_client()
             eq = c.xdxr(code)
@@ -199,10 +211,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if body:
                 data = json.loads(body)
-                code = data.get("code", "sh600000")
+                code = _safe_code(data.get("code", "sh600000"))
             else:
                 params = parse_qs(urlparse(self.path).query)
-                code = params.get("code", ["sh600000"])[0]
+                code = _safe_code(params.get("code", ["sh600000"])[0])
 
             c = get_client()
             fn = c.finance(code)
@@ -215,10 +227,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if body:
                 data = json.loads(body)
-                code = data.get("code", "sh600000")
+                code = _safe_code(data.get("code", "sh600000"))
             else:
                 params = parse_qs(urlparse(self.path).query)
-                code = params.get("code", ["sh600000"])[0]
+                code = _safe_code(params.get("code", ["sh600000"])[0])
 
             c = get_client()
             trades = c.today_trade(code, 0, 50)
@@ -229,9 +241,13 @@ class Handler(BaseHTTPRequestHandler):
     @_retry_on_conn_error
     def _handle_kline(self):
         params = parse_qs(urlparse(self.path).query)
-        code = params.get("code", ["sh600000"])[0]
+        code = _safe_code(params.get("code", ["sh600000"])[0])
         period = params.get("period", ["day"])[0]
-        count = int(params.get("count", ["50"])[0])
+        try:
+            count = int(params.get("count", ["50"])[0])
+        except (TypeError, ValueError):
+            count = 50
+        count = max(1, min(count, 65535))
         c = get_client()
         bars = c.kline(code, period=period, start=0, count=count)
         self._send_json({"code": code, "period": period, "count": len(bars), "kline": bars})
@@ -456,7 +472,12 @@ function showLoading(containerId) {
 }
 
 function showError(containerId, msg) {
-  el(containerId).innerHTML = '<div class="error">错误: ' + msg + '</div>';
+  const box = document.createElement('div');
+  box.className = 'error';
+  box.textContent = '错误: ' + String(msg);
+  const node = el(containerId);
+  node.innerHTML = '';
+  node.appendChild(box);
 }
 
 function showTable(containerId, headers, rows) {
@@ -684,7 +705,7 @@ loadOverview();
 def main():
     host = "0.0.0.0"
     port = 8080
-    server = HTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     print(f"Web 服务器启动于 http://{host}:{port}")
     try:
         server.serve_forever()

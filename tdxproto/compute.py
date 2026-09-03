@@ -45,6 +45,86 @@ def compute_factors(bars: list[Kline], equity: list[EquityChange],
     return factors
 
 
+def verify_qfq(bars: list[Kline], equity: list[EquityChange]) -> dict:
+    """QFQ 交叉验证：formula 计算 vs gap 检测，结果一致才采信。
+
+    Args:
+        bars: 不复权 K 线（按时间正序）
+        equity: 除权除息事件列表
+
+    Returns:
+        {
+            "formula_factors": {date_str: factor, ...},  # 公式法因子
+            "gap_events": [(date_str, gap_ratio), ...],  # gap 检测到的除权缺口
+            "match": True/False,                          # 两种方法是否一致
+            "details": {...},
+        }
+    """
+    from datetime import datetime as dt
+
+    # --- 方法一：公式法 ---
+    factors = compute_factors(bars, equity, adjust="qfq")
+    formula_factors = {str(d): round(f, 6) for d, f in sorted(factors.items())}
+
+    # --- 方法二：gap 检测法 ---
+    # 检测相邻 bar 之间的价格跳空（gap），反推复权因子
+    gap_events: list[tuple[str, float]] = []
+    b_sorted = sorted(bars, key=lambda b: b.time)
+    for i in range(1, len(b_sorted)):
+        prev_close = b_sorted[i - 1].close
+        curr_open = b_sorted[i].open
+        if prev_close > 0 and curr_open > 0:
+            gap_ratio = curr_open / prev_close
+            # 正常交易 gap 通常在 0.97~1.03 之间
+            # 除权日 gap 通常超过这个范围
+            if gap_ratio < 0.95 or gap_ratio > 1.05:
+                d = b_sorted[i].time
+                gap_events.append((d, round(gap_ratio, 6)))
+
+    # --- 交叉验证 ---
+    match = True
+    details: dict = {}
+    if gap_events:
+        # 用 gap 检测结果估算因子
+        gap_factors: dict[str, float] = {}
+        running_factor = 1.0
+        for d, ratio in reversed(gap_events):
+            # gap_ratio = curr_open / prev_close，除权后 open 会比 prev_close 低
+            # 复权因子 ≈ 1 / gap_ratio（对于 qfq，前复权放大旧价格）
+            running_factor /= ratio
+            gap_factors[d] = round(running_factor, 6)
+
+        # 对比公式法与 gap 法在相同日期的因子
+        common_dates = set(formula_factors.keys()) & set(gap_factors.keys())
+        mismatches = []
+        for d in sorted(common_dates):
+            f1 = formula_factors[d]
+            f2 = gap_factors[d]
+            if abs(f1 - f2) > 0.01:  # 允许 1% 误差
+                mismatches.append({"date": d, "formula": f1, "gap": f2})
+
+        match = len(mismatches) == 0
+        details = {
+            "formula_factors": formula_factors,
+            "gap_events": gap_events,
+            "gap_factors": gap_factors,
+            "mismatches": mismatches,
+        }
+    else:
+        details = {
+            "formula_factors": formula_factors,
+            "gap_events": [],
+            "reason": "未检测到除权缺口，仅采信公式法",
+        }
+
+    return {
+        "formula_factors": formula_factors,
+        "gap_events": gap_events,
+        "match": match,
+        "details": details,
+    }
+
+
 def get_equity_at(equity: list[EquityChange], target_date: date) -> tuple[float, float]:
     """获取指定日期的流通股本和总股本 (回溯最近一次变更)。"""
     changes = sorted(

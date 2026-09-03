@@ -48,6 +48,7 @@ from .commands import (
     _p_history_orders, _p_history_orders_v2,
     _p_quotes_encrypt, _p_recent_minute, _p_limits,
     _get_datetime, _cal_price, _cal_price1000,
+    UNUSUAL_TYPE_NAMES, describe_unusual,
 )
 from ..hosts import STOCK_HOSTS_FAST as STOCK_HOSTS
 
@@ -144,7 +145,13 @@ class StockClient:
             self._recv_pass(sock)
             sock.send(setup_cmd3())
             self._recv_pass(sock)
+            old_sock = self.sock
             self.sock = sock
+            if old_sock and old_sock is not sock:
+                try:
+                    old_sock.close()
+                except Exception:
+                    pass
             self._start_heartbeat()
         except (SystemExit, KeyboardInterrupt):
             raise
@@ -224,7 +231,11 @@ class StockClient:
         return body
 
     def _start_heartbeat(self):
-        self._stop_heartbeat.clear()
+        self._stop_heartbeat.set()
+        old = self._heartbeat_thread
+        if old and old.is_alive() and old is not threading.current_thread():
+            old.join(timeout=0.3)
+        self._stop_heartbeat = threading.Event()
         self._heartbeat_thread = threading.Thread(target=self._hb_loop, daemon=True)
         self._heartbeat_thread.start()
 
@@ -283,6 +294,11 @@ class StockClient:
                     return data
                 return data
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, ConnectionError) as e:
+                if self.sock:
+                    try:
+                        self.sock.close()
+                    except Exception:
+                        pass
                 self.sock = None
                 last_err = e
                 # 第一阶段：同主机指数退避重试（仅连接错误才重试）
@@ -293,6 +309,11 @@ class StockClient:
                         self.sock.send(pkg)
                         return self._recv_response(self.sock)
                     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, TimeoutError, ConnectionError) as e2:
+                        if self.sock:
+                            try:
+                                self.sock.close()
+                            except Exception:
+                                pass
                         self.sock = None
                         last_err = e2
                         continue
@@ -311,6 +332,11 @@ class StockClient:
                         self.sock.send(pkg)
                         return self._recv_response(self.sock)
                     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError, ConnectionError) as e2:
+                        if self.sock:
+                            try:
+                                self.sock.close()
+                            except Exception:
+                                pass
                         self.sock = None
                         last_err = e2
                 raise ConnectionError(f"connection lost after retry+failover: {last_err}") from e
@@ -321,16 +347,26 @@ class StockClient:
             return
         host, port = self._quote_host.rsplit(":", 1)
         port = int(port)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(self.timeout)
-        sock.connect((host, port))
-        sock.send(setup_cmd1())
-        self._recv_pass(sock)
-        sock.send(setup_cmd2())
-        self._recv_pass(sock)
-        sock.send(setup_cmd3())
-        self._recv_pass(sock)
-        self._quote_sock = sock
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            sock.connect((host, port))
+            sock.send(setup_cmd1())
+            self._recv_pass(sock)
+            sock.send(setup_cmd2())
+            self._recv_pass(sock)
+            sock.send(setup_cmd3())
+            self._recv_pass(sock)
+            self._quote_sock = sock
+        except Exception:
+            if sock:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            self._quote_sock = None
+            raise
 
     def _quote_send_recv(self, pkg: bytes) -> bytes:
         """通过专用快照行情连接发送请求并接收响应。未配置 quote_host 或连接失败时回退到主连接。"""
@@ -388,6 +424,12 @@ class StockClient:
                         self.sock.settimeout(orig)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError,
                     OSError, TimeoutError, ConnectionError):
+                if self.sock:
+                    try:
+                        self.sock.close()
+                    except Exception:
+                        pass
+                self.sock = None
                 return b"\x00\x00"
 
     # ---- 名称缓存 ----
@@ -613,6 +655,69 @@ class StockClient:
             empty_pages = 0
         return all_bars
 
+    def kline_120m(self, code: str, start: int = 0, count: int = 400) -> list[Kline]:
+        """120 分钟 K 线（聚合两根 60M 相邻 bar）。
+
+        协议无此枚举，后端特判：取 60M K 线，两两聚合。
+        open=第一根open, high=max, low=min, close=第二根close, vol/amount=sum。
+        奇数根丢弃最旧保最新，最多 400 根（需 800 根 60M）。
+        """
+        bars = self.kline(code, "60m", start, start + count * 2 + 1)
+        if len(bars) < 2:
+            return []
+        # 倒序处理方便取尾部
+        bars = list(reversed(bars))
+        result = []
+        for i in range(0, len(bars) - 1, 2):
+            b1, b2 = bars[i], bars[i + 1]
+            dt = b2.datetime
+            result.append(Kline(
+                datetime=dt,
+                open=b1.open,
+                high=max(b1.high, b2.high),
+                low=min(b1.low, b2.low),
+                close=b2.close,
+                volume=b1.volume + b2.volume,
+                amount=b1.amount + b2.amount,
+            ))
+        # 只取最近 count 根
+        return result[-count:] if len(result) > count else result
+
+    def kline_with_derived(self, code: str, period: str = "day", start: int = 0,
+                           count: int = 800, adjust: str = "",
+                           anchor: str = "") -> list[dict]:
+        """K 线 + 衍生字段（pre_close / change / change_pct / amplitude_pct）。
+
+        返回 dict 列表，每条含 Kline 字段 + pre_close / change / change_pct / amplitude_pct。
+        pre_close 为前一根 close（首根退化为本根 open）。
+        """
+        bars = self.kline(code, period, start, count, adjust, anchor)
+        if not bars:
+            return []
+        result = []
+        prev_close = 0.0
+        for b in bars:
+            pre_close = prev_close if prev_close > 0 else b.open
+            change = b.close - pre_close
+            change_pct = (change / pre_close * 100) if pre_close > 0 else 0.0
+            amp_pct = ((b.high - b.low) / pre_close * 100) if pre_close > 0 else 0.0
+            d = {
+                "datetime": b.datetime,
+                "open": b.open,
+                "high": b.high,
+                "low": b.low,
+                "close": b.close,
+                "volume": b.volume,
+                "amount": b.amount,
+                "pre_close": round(pre_close, 4),
+                "change": round(change, 4),
+                "change_pct": round(change_pct, 4),
+                "amplitude_pct": round(amp_pct, 4),
+            }
+            result.append(d)
+            prev_close = b.close
+        return result
+
     def codes_all(self, market: int) -> list[dict]:
         """获取全市场代码列表 (自动翻页)."""
         all_codes = []
@@ -730,7 +835,12 @@ class StockClient:
             year = r.get("year") or 0
             month = r.get("month") or 1
             day = r.get("day") or 1
-            eq_date = date(year, month, day) if year > 2000 else None
+            eq_date = None
+            if year >= 1990:
+                try:
+                    eq_date = date(year, month, day)
+                except ValueError:
+                    eq_date = None
             result.append(EquityChange(
                 date=eq_date,
                 category=r.get("category", 0),
@@ -948,10 +1058,17 @@ class StockClient:
                 return {"code": code, "members": members, "count": len(members)}
         except Exception:
             pass
-        market = 1 if clean.startswith("60") else 0
+        try:
+            mid, ex, _ = split_code(code)
+        except ValueError:
+            mid, ex = (1 if clean.startswith(("60", "68", "00")) else 0), ("sh" if clean.startswith(("60", "68", "00")) else "sz")
+        market = mid
         try:
             all_codes = self.codes_all(market)
-            sample = [f"{'sh' if market == 1 else 'sz'}{c}" for c in all_codes[:top_n]]
+            sample = []
+            for item in all_codes[:top_n]:
+                raw = item["code"] if isinstance(item, dict) else str(item)
+                sample.append(f"{ex}{raw}")
             quotes = self.quotes_detail(sample)
             return {"code": code, "members": quotes, "count": len(quotes)}
         except Exception:

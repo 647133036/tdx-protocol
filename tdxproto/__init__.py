@@ -24,10 +24,11 @@ from .models import (
     BoardListItem, BoardRankingItem,
     CapitalFlowData, MarketStat, ServerSession, SymbolInfo,
 )
-from .compute import compute_factors, get_equity_at, calc_turnover, parse_xdxr, auction_0925
+from .compute import compute_factors, get_equity_at, calc_turnover, parse_xdxr, auction_0925, verify_qfq
 from .stock import StockClient
 from .futures import FuturesClient
 from .cninfo import CninfoClient, Announcement, CninfoError
+from .ccpm import CcpmClient, CcpmError, CcpmNoDataError, MemberRank, CcpmProductMeta
 from .info import InfoClient, InfoCollector
 from .scanner import (
     scan_stock, scan_futures, ProbeResult,
@@ -50,17 +51,18 @@ try:
 except ImportError:
     _HAS_MAC = False
 
-__version__ = "1.0.8"
+__version__ = "0.0.1"
 __all__ = [
     "StockClient", "FuturesClient", "MacClient",
     "InfoClient", "InfoCollector",
     "CninfoClient", "Announcement", "CninfoError",
+    "CcpmClient", "CcpmError", "CcpmNoDataError", "MemberRank", "CcpmProductMeta",
     "Quote", "Kline", "Minute", "Trade",
     "EquityChange", "FinanceInfo", "PriceLimit",
     "TdxBlock", "BelongBoardInfo", "BoardMember", "BoardSummary",
     "BoardListItem", "BoardRankingItem",
     "CapitalFlowData", "MarketStat", "ServerSession", "SymbolInfo",
-    "compute_factors", "get_equity_at", "calc_turnover", "parse_xdxr", "auction_0925",
+    "compute_factors", "get_equity_at", "calc_turnover", "parse_xdxr", "auction_0925", "verify_qfq",
     "classify", "normalize_code",
     "scan_stock", "scan_futures", "ProbeResult",
     "DEFAULT_TIMEOUT", "DEFAULT_WORKERS",

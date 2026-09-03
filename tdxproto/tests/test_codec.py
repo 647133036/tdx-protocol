@@ -64,6 +64,12 @@ class TestGetPrice:
         _, pos = get_price(data)
         assert pos == 1
 
+    def test_truncated_varint_raises(self):
+        with pytest.raises(IndexError):
+            get_price(b"")
+        with pytest.raises(IndexError):
+            get_price(b"\x80")
+
 
 class TestDecodeVolume:
     def test_zero(self):

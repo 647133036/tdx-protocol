@@ -123,14 +123,33 @@ class TestCountUpperLimit:
     """kline count 上限校验."""
 
     def test_count_within_limit(self):
-        """正常 count 不报错."""
-        assert 65535 >= 0
+        from main import stock_kline
+        class A:
+            count = 100
+            code = "sz000001"
+            period = "day"
+            start = 0
+            adjust = ""
+            anchor = ""
+        c = MagicMock()
+        c.kline.return_value = []
+        stock_kline(c, A())
+        c.kline.assert_called_once()
 
-    def test_count_exceeds_limit_raises(self):
-        """超过 65535 应在 CLI 层拒绝."""
-        with pytest.raises(SystemExit):
-            if 70000 > 65535:
-                raise SystemExit("错误: --count 最大值为 65535")
+    def test_count_exceeds_limit_raises(self, capsys):
+        from main import stock_kline
+        class A:
+            count = 70000
+            code = "sz000001"
+            period = "day"
+            start = 0
+            adjust = ""
+            anchor = ""
+        c = MagicMock()
+        stock_kline(c, A())
+        err = capsys.readouterr().err
+        assert "65535" in err
+        c.kline.assert_not_called()
 
 
 class TestKlineDateFilter:
@@ -177,14 +196,68 @@ class TestKlineDateFilter:
         assert len(rows) == 0
 
     def test_filters_far_past_year(self):
-        """year < 2000 应被过滤."""
+        """year < 1990 应被过滤."""
         bars_data = bytearray()
-        bars_data.extend(struct.pack("<I", 19990101))
-        for _ in range(4):
-            bars_data.extend(b"\x00" * 4)
+        bars_data.extend(struct.pack("<I", 19890101))
+        bars_data.extend(b"\x0a\x00\x00\x00")
+        bars_data.extend(struct.pack("<I", 0))
         bars_data.extend(struct.pack("<I", 0))
         bars_data.extend(struct.pack("<I", 0))
 
         resp = struct.pack("<H", 1) + bytes(bars_data)
-        rows = _p_kline(resp, 9, "sh999999", coefficient=0.01, market=1)
+        rows = _p_kline(resp, 9, "sz000001", coefficient=0.01, market=0)
         assert len(rows) == 0
+
+    def test_keeps_1990s_bars(self):
+        """1990-1999 的合法日 K 应保留."""
+        def ev(val):
+            if val == 0:
+                return b"\x00"
+            sign = 0x40 if val < 0 else 0
+            av = abs(val)
+            fb = (av & 0x3F) | sign
+            av >>= 6
+            if av == 0:
+                return bytes([fb])
+            r = bytearray([fb | 0x80])
+            while av:
+                r.append((av & 0x7F) | (0x80 if (av >> 7) else 0))
+                av >>= 7
+            return bytes(r)
+
+        bars_data = bytearray()
+        bars_data.extend(struct.pack("<I", 19910102))
+        bars_data.extend(ev(10000))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(ev(0))
+        bars_data.extend(struct.pack("<I", 0))
+        bars_data.extend(struct.pack("<I", 0))
+        resp = struct.pack("<H", 1) + bytes(bars_data)
+        rows = _p_kline(resp, 9, "sz000001", coefficient=0.01, market=0)
+        assert len(rows) == 1
+        assert rows[0]["year"] == 1991
+
+
+class TestIndexInfoCodes:
+    def test_index_info_uses_dict_code_field(self):
+        client = StockClient(timeout=5, auto_reconnect=False)
+        with patch.object(client, "board_members", side_effect=Exception("no mac")):
+            with patch.object(client, "codes_all", return_value=[{"code": "000001", "name": "平安银行"}]):
+                with patch.object(client, "quotes_detail", return_value=[{"code": "sz000001"}]) as mock_qd:
+                    result = client.index_info("sz000001", top_n=1)
+        assert result["count"] == 1
+        mock_qd.assert_called_once()
+        sample = mock_qd.call_args[0][0]
+        assert sample == ["sz000001"]
+
+
+class TestXdxrInvalidDate:
+    def test_invalid_calendar_date_does_not_raise(self):
+        client = StockClient(timeout=5, auto_reconnect=False)
+        fake = [{"year": 2024, "month": 2, "day": 30, "category": 1, "fenhong": 0.1}]
+        with patch.object(client, "_send_recv", return_value=b"\x00\x00"):
+            with patch("tdxproto.stock.client._p_xdxr", return_value=fake):
+                rows = client.xdxr("sz000001")
+        assert len(rows) == 1
+        assert rows[0].date is None

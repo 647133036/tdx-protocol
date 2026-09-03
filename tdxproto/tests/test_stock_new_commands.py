@@ -155,6 +155,16 @@ class TestParsers(unittest.TestCase):
         result = _p_tick_chart(data)
         self.assertEqual(result, [])
 
+    def test_tick_chart_uses_coefficient(self):
+        data = bytearray(struct.pack("<H", 1))
+        data.extend(struct.pack("<H", 570))
+        data.extend(b"\x0a\x00\x00\x00\x00")
+        stock = _p_tick_chart(bytes(data), coefficient=0.01)
+        etf = _p_tick_chart(bytes(data), coefficient=0.001)
+        self.assertEqual(len(stock), 1)
+        self.assertAlmostEqual(stock[0]["price"], 0.10)
+        self.assertAlmostEqual(etf[0]["price"], 0.01)
+
     def test_auction_empty(self):
         result = _p_auction(b"\x00\x00")
         self.assertEqual(result, [])

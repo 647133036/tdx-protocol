@@ -30,12 +30,7 @@
 import argparse
 import json
 import sys
-from datetime import date
-
-try:
-    import dateutil.parser
-except ImportError:
-    dateutil = None
+from datetime import date, datetime
 
 from tdxproto import StockClient, FuturesClient
 from tdxproto import compute_factors, get_equity_at, calc_turnover, parse_xdxr
@@ -73,6 +68,8 @@ def stock_quote(c, a):
     js(result)
 
 def stock_kline(c, a):
+    if a.count > 65535:
+        print(f"错误: --count 最大值为 65535, 当前值={a.count}", file=sys.stderr); return
     js(c.kline(a.code, a.period, a.start, a.count, a.adjust, a.anchor or ""))
 
 def stock_kline_all(c, a):
@@ -140,7 +137,7 @@ def stock_turnover(c, a):
         float_shares = eq_float
     qs = c.quote(a.code)
     if qs:
-        vol = qs.get("vol", 0)
+        vol = getattr(qs, "volume", 0) if not isinstance(qs, dict) else qs.get("vol", qs.get("volume", 0))
         to = calc_turnover(vol, float_shares)
         print(f"换手率: {to:.2f}%  (成交量={vol}, 流通股本={float_shares:.0f}万)")
 
@@ -166,9 +163,11 @@ def stock_blocks(c, a):
 def stock_block_members(c, a):
     js(c.block_members(a.block_code))
 
+from datetime import datetime
+
 def stock_workday(c, a):
-    import dateutil.parser
-    d = dateutil.parser.isoparse(a.date).date() if a.date else None
+    from tdxproto.workday import get_workday_manager
+    d = datetime.fromisoformat(a.date).date() if a.date else None
     wm = get_workday_manager(c)
     result = {"date": str(d or date.today()), "is_workday": wm.is_workday(d)}
     js(result)
@@ -281,10 +280,10 @@ def main():
     # Stock
     s = sub.add_parser("stock", help="7709 股票行情")
     ss = s.add_subparsers(dest="cmd")
-    a = ss.add_parser("count", help="0x044e 代码数量"); a.add_argument("market")
-    a = ss.add_parser("codes", help="0x044d 代码表"); a.add_argument("market"); a.add_argument("--start", type=int, default=0); a.add_argument("--limit", type=int, default=1600); a.add_argument("--all", action="store_true")
+    a = ss.add_parser("count", help="0x044e 代码数量"); a.add_argument("market", type=int)
+    a = ss.add_parser("codes", help="0x044d 代码表"); a.add_argument("market", type=int); a.add_argument("--start", type=int, default=0); a.add_argument("--limit", type=int, default=1600); a.add_argument("--all", action="store_true")
     a = ss.add_parser("quote", help="0x054c 批量快照"); a.add_argument("codes")
-    a = ss.add_parser("kline", help="0x052d K线(含复权)"); a.add_argument("code"); a.add_argument("--period", default="day"); a.add_argument("--start", type=int, default=0); a.add_argument("--count", type=int, default=100); a.add_argument("--adjust", default=""); a.add_argument("--anchor", default="")
+    a = ss.add_parser("kline", help="0x052d K线(含复权)"); a.add_argument("code"); a.add_argument("--period", default="day"); a.add_argument("--start", type=int, default=0); a.add_argument("--count", type=int, default=100, dest="count", metavar="COUNT"); a.add_argument("--adjust", default=""); a.add_argument("--anchor", default="")
     a = ss.add_parser("kline-all", help="自动翻页拉全量K线"); a.add_argument("code"); a.add_argument("--period", default="day"); a.add_argument("--adjust", default="")
     a = ss.add_parser("minute", help="0x0feb/0x0537 分时"); a.add_argument("code"); a.add_argument("--date", default=None)
     a = ss.add_parser("aux", help="0x051b 分时副图"); a.add_argument("code")

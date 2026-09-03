@@ -81,6 +81,8 @@ def get_price(data: bytes, pos: int = 0) -> Tuple[int, int]:
     返回 (价格增量_分, 下一个偏移).
     对齐 pytdx helper.get_price.
     """
+    if pos >= len(data):
+        raise IndexError("get_price: pos out of range")
     pos_byte = 6
     bdata = _index_bytes(data, pos)
     int_data = bdata & 0x3F
@@ -91,12 +93,12 @@ def get_price(data: bytes, pos: int = 0) -> Tuple[int, int]:
     if bdata & 0x80:
         while True:
             pos += 1
+            if pos >= len(data):
+                raise IndexError("get_price: truncated varint")
             bdata = _index_bytes(data, pos)
             int_data += (bdata & 0x7F) << pos_byte
             pos_byte += 7
-            if bdata & 0x80:
-                pass
-            else:
+            if not (bdata & 0x80):
                 break
     pos += 1
     if sign:
