@@ -168,9 +168,9 @@ python -m pytest tdxproto/tests/ -v
 python -m pytest tdxproto/tests/ -v -m "not system"
 ```
 
-311 个用例通过，8 个系统测试跳过（需外网）。
+316 个用例通过，8 个系统测试跳过（需外网）。
 
 ## 变更记录
 
-- **0.0.1** — 初始版本：7709 股票 + 7727 期货 + 7615 F10 资讯 + MAC 板块；断线自愈；IP 优选；本地计算引擎；批量采集
-- **0.0.2** — 修复 stock workday（dateutil 依赖）；--count 越界检查前置；tick_chart ETF 系数；index_info 代码提取；K 线下界 1990；短包解析；重连 socket 泄漏；_send_recv_quick 超时；UNUSUAL_TYPE_NAMES 25 种；describe_unusual；kline_120m 聚合；CcpmClient 中金所持仓排名；verify_qfq QFQ 交叉验证（formula vs gap）；README 重写；316 tests pass
+- **1.1.0** — 新增 CcpmClient（中金所持仓排名 IF/IH/IC/IM/TS/TF/T/TL）；新增 kline_120m（120 分钟 K 线聚合）；新增 verify_qfq（QFQ 交叉验证 formula vs gap）；新增 UNUSUAL_TYPE_NAMES 25 种异常类型 + describe_unusual；修复 stock workday dateutil 依赖；--count > 65535 越界检查前置；tick_chart ETF/bond 系数；index_info 代码提取；K 线下界 1990；短包解析容错；重连 socket 泄漏；_send_recv_quick 超时废弃连接
+- **1.0.8** — 初始版本：7709 股票 + 7727 期货 + 7615 F10 资讯 + MAC 板块；断线自愈；IP 优选；本地计算引擎；批量采集
