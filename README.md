@@ -173,4 +173,15 @@ python -m pytest tdxproto/tests/ -v -m "not system"
 ## 变更记录
 
 - **1.1.0** — 新增 CcpmClient（中金所持仓排名 IF/IH/IC/IM/TS/TF/T/TL）；新增 kline_120m（120 分钟 K 线聚合）；新增 verify_qfq（QFQ 交叉验证 formula vs gap）；新增 UNUSUAL_TYPE_NAMES 25 种异常类型 + describe_unusual；修复 stock workday dateutil 依赖；--count > 65535 越界检查前置；tick_chart ETF/bond 系数；index_info 代码提取；K 线下界 1990；短包解析容错；重连 socket 泄漏；_send_recv_quick 超时废弃连接
-- **1.0.8** — 初始版本：7709 股票 + 7727 期货 + 7615 F10 资讯 + MAC 板块；断线自愈；IP 优选；本地计算引擎；批量采集
+- **1.0.8** — 修复 `_recv_response` 中 `zlib.error` 未捕获导致全链路崩溃的根因问题；`finance`/`report_file`/`vol_profile`/`top_board` 分别加固异常处理；`auction` 切换为短超时通道消除 3.6s 重试链；`index_info` 增加备用路径；`main.py` 修正 `finance` 调用方式
+- **1.0.7** — 核心修复：缺失 `pyproject.toml` 导致 `pip install git+...` 静默失败；修复 `KeyError: 0`（`_p_capital_flow` 在 dict 响应上索引崩溃）；修复 `AttributeError: 'Quote' object has no attribute 'get'`；`get_tdx_*` 系列改用 `_send_recv_quick` 消除超时；`chart_sampling`/`history_orders` 超时修复；`vol_profile` 参数优化；`unusual` 前缀过滤修正；`_p_quotes_list` 空响应守卫；`_get_zhb_file` 缓存空结果修复
+- **1.0.6** — 4 个服务器不支持的命令改用替代实现（vol_profile 用 today_trade 计算；index_momentum 用 kline 计算；index_info 用 board_members/codes_all+quotes_detail；unusual 用 today_trade 过滤大单）
+- **1.0.5** — 4 个命令超时修复（新增 `_send_recv_quick` 短超时方法）
+- **1.0.4** — 修复 `market_stat`（`Quote` dataclass 误用 `.get()`）；50 接口全量实测验证；README 重写加入实测结果表和参数注意事项
+- **1.0.3** — 修复 6 个 InfoClient bug；新增官方字段字典 `field_dict.py`；InfoCollector 新增 6 个语义化方法
+- **1.0.2** — 新增 InfoClient (7615 F10 HTTP 网关)；InfoCollector 结构化采集
+- **1.0.1** — 完整 API 参考文档
+
+## License
+
+MIT
