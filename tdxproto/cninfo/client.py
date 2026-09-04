@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 from urllib import parse
 from urllib import request as urlrequest
+from urllib.parse import urlparse
 
 from .models import Announcement, CninfoError, build_detail_url, build_pdf_url
 
@@ -31,23 +32,39 @@ _UA = (
 _STOCK_MAP_URL = "http://www.cninfo.com.cn/new/data/szse_stock.json"
 _QUERY_URL = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
 _DETAIL_URL = "https://www.cninfo.com.cn/new/disclosure/detail"
+_ALLOWED_HOSTS = frozenset({
+    "www.cninfo.com.cn",
+    "static.cninfo.com.cn",
+})
 
 _ORGID_MAP: dict[str, str] = {}
 
 
+def _assert_allowed_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise CninfoError(f"不允许的 URL scheme: {parsed.scheme}")
+    host = (parsed.hostname or "").lower()
+    if host not in _ALLOWED_HOSTS:
+        raise CninfoError(f"不允许的下载主机: {host}")
+
+
 def _http_get_json(url: str, timeout: float = 15.0) -> Any:
+    _assert_allowed_url(url)
     req = urlrequest.Request(url, headers={"User-Agent": _UA})
     with urlrequest.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _http_get_text(url: str, timeout: float = 15.0) -> str:
+    _assert_allowed_url(url)
     req = urlrequest.Request(url, headers={"User-Agent": _UA})
     with urlrequest.urlopen(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
 
 def _http_post_form(url: str, payload: dict[str, str], timeout: float = 15.0) -> Any:
+    _assert_allowed_url(url)
     data = parse.urlencode(payload).encode("utf-8")
     req = urlrequest.Request(
         url,
@@ -331,18 +348,26 @@ class CninfoClient:
         pdf_url = announcement.pdf_url
         if not pdf_url:
             raise CninfoError("该公告无 PDF 附件")
+        _assert_allowed_url(pdf_url)
         if filename is None:
             filename = f"{announcement.date}_{announcement.announcement_id}.PDF"
-        dest = Path(dest_dir)
+        name = Path(filename).name
+        if not name or name in (".", ".."):
+            raise CninfoError("非法文件名")
+        dest = Path(dest_dir).resolve()
         dest.mkdir(parents=True, exist_ok=True)
-        path = dest / filename
+        path = (dest / name).resolve()
+        if dest not in path.parents and path != dest:
+            raise CninfoError("非法下载路径")
         try:
             req = urlrequest.Request(pdf_url, headers={"User-Agent": _UA})
             with urlrequest.urlopen(req, timeout=self.timeout) as resp:
                 path.write_bytes(resp.read())
+        except CninfoError:
+            raise
         except Exception as e:
             raise CninfoError(f"PDF 下载失败: {e}") from e
-        return str(path.resolve())
+        return str(path)
 
     def search(self, code: str, **kwargs) -> list[dict]:
         """公告检索（``get_announcements`` 的简写别名）."""

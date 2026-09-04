@@ -14,6 +14,12 @@ from typing import Optional
 from .models import Kline, EquityChange
 
 
+def _parse_bar_date(bar: Kline) -> date:
+    """Parse bar.time string to date object."""
+    t = bar.time.replace("-", "")
+    return date(int(t[:4]), int(t[4:6]), int(t[6:8]))
+
+
 class GbbqManager:
     """股本变迁管理器，提供前复权/后复权计算能力.
     
@@ -154,11 +160,12 @@ class GbbqManager:
         if not equity_list:
             return None
         
-        for eq in reversed(equity_list):
+        best = None
+        for eq in equity_list:
             if eq.date and eq.date <= target_date:
-                return eq
-        
-        return None
+                if best is None or eq.date > best.date:
+                    best = eq
+        return best
     
     def _load_from_db(self, code: str) -> list[EquityChange]:
         """从数据库加载股本变迁数据."""
@@ -214,7 +221,7 @@ class GbbqManager:
         
         result = []
         for bar in bars:
-            factor = factors.get(bar.date)
+            factor = factors.get(_parse_bar_date(bar))
             if factor is not None and factor != 1.0:
                 result.append(Kline(
                     time=bar.time,
@@ -257,7 +264,7 @@ class GbbqManager:
         
         result = []
         for bar in bars:
-            factor = factors.get(bar.date)
+            factor = factors.get(_parse_bar_date(bar))
             if factor is not None and factor != 1.0:
                 result.append(Kline(
                     time=bar.time,

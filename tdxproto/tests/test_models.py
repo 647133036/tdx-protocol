@@ -67,6 +67,7 @@ class TestKlineModel:
         )
         assert k.position == 50000
         assert k.settlement == 10.3
+        assert k.datetime == "20250101"
 
 
 class TestMinuteModel:

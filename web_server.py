@@ -14,18 +14,22 @@ from tdxproto.stock import StockClient
 _client = None
 _client_lock = threading.Lock()
 
+# ---- 安全常量 ----
+_MAX_REQUEST_BODY = 1024 * 1024      # POST body 上限 1 MB
+_MAX_KLINE_BARS = 5000               # 单次 kline_all 返回条数上限
+_MAX_CODES_FROM_SERVER = 500         # 从服务器拉取代码列表上限
+
 
 def get_client():
     global _client
-    if _client is None or _client.sock is None:
-        with _client_lock:
-            if _client is None or _client.sock is None:
+    with _client_lock:
+        if _client is None or getattr(_client, "sock", None) is None:
+            try:
                 _client = StockClient(timeout=5, rate_limit=0.5)
-                try:
-                    _client.connect()
-                except Exception:
-                    _client = None
-                    raise
+                _client.connect()
+            except Exception:
+                _client = None
+                raise
     return _client
 
 
@@ -45,7 +49,7 @@ def _retry_on_conn_error(handler_func):
             try:
                 return handler_func(*args, **kwargs)
             except Exception as e:
-                self._send_json({"error": str(e)}, 500)
+                self._send_json({"error": self._sanitize_error(e)}, 500)
     return wrapper
 
 
@@ -63,7 +67,7 @@ def dc_to_dict(obj):
     return str(obj)
 
 
-_CODE_RE = re.compile(r"^[A-Za-z0-9]{1,12}$")
+_CODE_RE = re.compile(r"^(?:sz|sh|bj)?[0-9]{6}$", re.IGNORECASE)
 
 
 def _safe_code(raw: str, default: str = "sh600000") -> str:
@@ -80,12 +84,15 @@ class Handler(BaseHTTPRequestHandler):
         pass  # 静默日志
 
     def _send_json(self, data, status=200):
-        body = json.dumps(data, ensure_ascii=False, default=dc_to_dict).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data, ensure_ascii=False, default=dc_to_dict).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -115,6 +122,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         content_length = int(self.headers.get("Content-Length", 0))
+        if content_length > _MAX_REQUEST_BODY:
+            self._send_error(413, "Request body too large")
+            return
         body = self.rfile.read(content_length) if content_length > 0 else b""
 
         if parsed.path == "/api/kline-all":
@@ -138,7 +148,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(html.encode("utf-8"))
 
     def _handle_status(self):
-        connected = _client is not None and getattr(_client, "sock", None) is not None
+        with _client_lock:
+            connected = _client is not None and getattr(_client, "sock", None) is not None
         self._send_json({"status": "ok", "connected": connected})
 
     @_retry_on_conn_error
@@ -170,9 +181,12 @@ class Handler(BaseHTTPRequestHandler):
 
             c = get_client()
             bars = c.kline_all(code, period=period)
-            self._send_json({"code": code, "period": period, "count": len(bars), "kline": bars})
+            total = len(bars)
+            if total > _MAX_KLINE_BARS:
+                bars = bars[:_MAX_KLINE_BARS]
+            self._send_json({"code": code, "period": period, "count": total, "returned": len(bars), "kline": bars})
         except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+            self._send_json({"error": self._sanitize_error(e)}, 500)
 
     @_retry_on_conn_error
     def _handle_codes(self, body=None):
@@ -185,10 +199,10 @@ class Handler(BaseHTTPRequestHandler):
                 market = int(params.get("market", ["1"])[0])
 
             c = get_client()
-            codes = c.codes_all(market)
+            codes = c.list(market, start=0, limit=_MAX_CODES_FROM_SERVER)
             self._send_json({"market": market, "count": len(codes), "codes": codes[:200]})
         except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+            self._send_json({"error": self._sanitize_error(e)}, 500)
 
     @_retry_on_conn_error
     def _handle_xdxr(self, body=None):
@@ -204,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
             eq = c.xdxr(code)
             self._send_json({"code": code, "count": len(eq), "xdxr": eq})
         except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+            self._send_json({"error": self._sanitize_error(e)}, 500)
 
     @_retry_on_conn_error
     def _handle_finance(self, body=None):
@@ -220,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
             fn = c.finance(code)
             self._send_json({"code": code, "finance": fn})
         except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+            self._send_json({"error": self._sanitize_error(e)}, 500)
 
     @_retry_on_conn_error
     def _handle_trade(self, body=None):
@@ -236,7 +250,7 @@ class Handler(BaseHTTPRequestHandler):
             trades = c.today_trade(code, 0, 50)
             self._send_json({"code": code, "count": len(trades), "trade": trades})
         except Exception as e:
-            self._send_json({"error": str(e)}, 500)
+            self._send_json({"error": self._sanitize_error(e)}, 500)
 
     @_retry_on_conn_error
     def _handle_kline(self):
@@ -251,6 +265,13 @@ class Handler(BaseHTTPRequestHandler):
         c = get_client()
         bars = c.kline(code, period=period, start=0, count=count)
         self._send_json({"code": code, "period": period, "count": len(bars), "kline": bars})
+
+    def _sanitize_error(self, e: Exception) -> str:
+        """脱敏异常信息，防止泄露内部服务器地址/端口/堆栈。"""
+        msg = str(e)
+        msg = re.sub(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?\b", "[REDACTED]", msg)
+        msg = re.sub(r"/\S{20,}", "[PATH REDACTED]", msg)
+        return msg[:512]
 
     def _send_error(self, code, message):
         self._send_json({"error": message}, code)

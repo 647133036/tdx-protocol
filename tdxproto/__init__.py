@@ -42,7 +42,13 @@ from .hosts import (
 from .block_reader import parse_block_dat
 from .gbbq import GbbqManager, get_gbbq_manager
 from .workday import WorkdayManager, get_workday_manager
+from .session import (
+    in_trading, in_auction, session_status, last_session_date,
+    should_use_realtime_minute, ashare_minute_labels,
+)
 from .block_bridge import BlockBridge, get_block_bridge
+from .universe import CORE_LEADERS, CORE_LEADERS_DESC, core_leader_codes
+from .hk import HkClient, HkQuote
 from .ip_health import get_manager
 try:
     from .mac.client import MacClient
@@ -51,7 +57,7 @@ try:
 except ImportError:
     _HAS_MAC = False
 
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 __all__ = [
     "StockClient", "FuturesClient", "MacClient",
     "InfoClient", "InfoCollector",
@@ -72,8 +78,12 @@ __all__ = [
     "parse_block_dat",
     "GbbqManager", "get_gbbq_manager",
     "WorkdayManager", "get_workday_manager",
+    "in_trading", "in_auction", "session_status", "last_session_date",
+    "should_use_realtime_minute", "ashare_minute_labels",
     "BlockBridge", "get_block_bridge",
+    "CORE_LEADERS", "CORE_LEADERS_DESC", "core_leader_codes",
     "get_manager",
+    "HkClient", "HkQuote",
     "BoardType", "SortColumn", "SortOrder", "FieldBit",
     "Category", "FilterType",
 ]

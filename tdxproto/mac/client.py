@@ -18,7 +18,7 @@ from ..mac.commands import (
     _b_capital_flow, _p_capital_flow,
     _b_server_info, _p_server_info,
     _b_symbol_info, _p_symbol_info,
-    Category, FilterType, SortOrder,
+    Category, FilterType, SortOrder, SortColumn,
 )
 
 _MAC_RESP_FLAGS = (0x1C, 0xB1)
@@ -196,6 +196,39 @@ class MacClient:
         boards.sort(
             key=lambda x: x.get("change_pct", 0),
             reverse=(sort_order == SortOrder.DESC),
+        )
+        return boards[:top_n]
+
+    def board_amount_ranking(
+        self,
+        board_type: int = 0,
+        top_n: int = 100,
+        sort_order: int = SortOrder.DESC,
+    ) -> list[dict]:
+        """按成交额获取板块排行.
+
+        通过 board_list 请求服务器按成交额排序，返回 top_n 条.
+        """
+        boards = self.board_list(
+            page_size=300,
+            board_type=board_type,
+            sort_column=SortColumn.AMOUNT,
+            sort_order=sort_order,
+        )
+        return boards[:top_n]
+
+    def board_volume_ranking(
+        self,
+        board_type: int = 0,
+        top_n: int = 100,
+        sort_order: int = SortOrder.DESC,
+    ) -> list[dict]:
+        """按成交量获取板块排行."""
+        boards = self.board_list(
+            page_size=300,
+            board_type=board_type,
+            sort_column=SortColumn.VOL,
+            sort_order=sort_order,
         )
         return boards[:top_n]
 

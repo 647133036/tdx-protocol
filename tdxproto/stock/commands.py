@@ -538,6 +538,36 @@ def _p_snapshot(data: bytes, coefficient: float = 0.01) -> list[dict]:
 def _cal_price(base_p, diff, coefficient=0.01):
     return float(base_p + diff) * coefficient
 
+
+def is_index_code(code: str = None, market: int = None) -> bool:
+    """判定是否指数：沪 000/88，深 399。"""
+    if not code:
+        return False
+    nc = code.strip().lower()
+    ex = ""
+    if nc.startswith(("sz", "sh", "bj")):
+        ex = nc[:2]
+        nc = nc[2:]
+    if market is None:
+        if ex == "sh":
+            market = 1
+        elif ex == "sz":
+            market = 0
+        elif ex == "bj":
+            market = 2
+    return (market == 1 and nc.startswith(("000", "88"))) or \
+           (market == 0 and nc.startswith("399"))
+
+
+def _minute_score(rows: list[dict]) -> tuple:
+    """(正价格数, 非零量数, 条数)：用于指数分时步长自适应比较。"""
+    if not rows:
+        return (-1, -1, -1)
+    pos = sum(1 for r in rows if float(r.get("price") or 0) > 0)
+    nvol = sum(1 for r in rows if int(r.get("vol") or 0) > 0)
+    return (pos, nvol, len(rows))
+
+
 def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 0.01,
              market: int = None) -> list[dict]:
     """对齐 pytdx GetSecurityBarsCmd.parseResponse.
@@ -558,18 +588,7 @@ def _p_kline(data: bytes, category: int, code: str = None, coefficient: float = 
     _MINUTE_CATS = frozenset({0, 1, 2, 3, 7, 8})
     _WEEK_PLUS_CATS = frozenset({5, 6, 10, 11})
 
-    is_idx = False
-    if code:
-        nc = code.strip().lower()
-        ex = ""
-        if nc.startswith(("sz", "sh", "bj")):
-            ex = nc[:2]
-            nc = nc[2:]
-        # 指数判定：需同时满足 market 和代码前缀两个条件
-        # SH(1): 000xxx=上证指数, 88xxx=板块指数; SZ(0): 399xxx=深证指数
-        if (market == 1 and nc.startswith(("000", "88"))) or \
-           (market == 0 and nc.startswith("399")):
-            is_idx = True
+    is_idx = is_index_code(code, market)
 
     if len(data) < 4:
         return []
@@ -642,12 +661,24 @@ def _get_datetime(category, buffer, pos):
     pos += 4
     return year, month, day, hour, minute, pos
 
-def _p_today_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
+def _p_today_minute(data: bytes, coefficient: float = 0.01,
+                    is_idx: bool = False) -> list[dict]:
     """对齐 pytdx GetMinuteTimeData.parseResponse.
-    
+
     响应格式: 固定头(11B) + 变长额外头 + 数据区(num条×3个varint).
-    通过解析全部varint后从尾部取 num*3 个来定位数据起始.
+    指数分时部分服务器每条多 1 个 varint，is_idx 时自适应选 3/4 步长：
+    以 (正价格数, 非零量数, 条数) 打分，仅当 4 步长严格更优时切换。
     """
+    rows3 = _parse_today_minute_stride(data, coefficient, 3)
+    if not is_idx:
+        return rows3
+    rows4 = _parse_today_minute_stride(data, coefficient, 4)
+    if _minute_score(rows4) > _minute_score(rows3):
+        return rows4
+    return rows3
+
+
+def _parse_today_minute_stride(data: bytes, coefficient: float, stride: int) -> list[dict]:
     if len(data) < 2:
         return []
     (num,) = struct.unpack("<H", data[:2])
@@ -661,14 +692,14 @@ def _p_today_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
             vals.append(v)
     except IndexError:
         pass
-    if num * 3 > len(vals):
+    if num * stride > len(vals):
         return []
-    start = len(vals) - num * 3
+    start = len(vals) - num * stride
     last_price = 0
     prices = []
     for i in range(num):
-        price_raw = vals[start + i * 3]
-        vol = vals[start + i * 3 + 2]
+        price_raw = vals[start + i * stride]
+        vol = vals[start + i * stride + 2]
         last_price = last_price + price_raw
         prices.append({
             "price": last_price * coefficient,
@@ -707,10 +738,29 @@ def _p_today_trade(data: bytes, coefficient: float = 0.01) -> list[dict]:
         pass
     return ticks
 
-def _p_history_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
-    """对齐 pytdx GetHistoryMinuteTimeData.parseResponse."""
+def _p_history_minute(data: bytes, coefficient: float = 0.01,
+                      is_idx: bool = False) -> list[dict]:
+    """对齐 pytdx GetHistoryMinuteTimeData.parseResponse.
+
+    指数分时部分服务器每条末尾多 4 字节。is_idx 时按"完整解析条数 +
+    字节消耗恰好到末尾"判定选择 extra=0 或 extra=4。
+    """
+    rows, end0 = _parse_history_minute(data, coefficient, extra=0)
+    if not is_idx:
+        return rows
+    alt, end4 = _parse_history_minute(data, coefficient, extra=4)
+    # 条数多者优先；条数相同取字节消耗更接近报文末尾者
+    score0 = (len(rows), -abs(len(data) - end0))
+    score4 = (len(alt), -abs(len(data) - end4))
+    if score4 > score0:
+        return alt
+    return rows
+
+
+def _parse_history_minute(data: bytes, coefficient: float, extra: int = 0):
+    """解析历史分时，返回 (rows, 结束时字节偏移)。"""
     if len(data) < 2:
-        return []
+        return [], 0
     pos = 0
     (num,) = struct.unpack("<H", data[:2])
     last_price = 0
@@ -721,6 +771,10 @@ def _p_history_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
             price_raw, pos = get_price(data, pos)
             _, pos = get_price(data, pos)
             vol, pos = get_price(data, pos)
+            if extra:
+                pos += extra
+                if pos > len(data):
+                    break
             last_price = last_price + price_raw
             prices.append({
                 "price": float(last_price) * coefficient,
@@ -728,7 +782,7 @@ def _p_history_minute(data: bytes, coefficient: float = 0.01) -> list[dict]:
             })
     except (IndexError, struct.error):
         pass
-    return prices
+    return prices, pos
 
 def _p_history_trade(data: bytes, coefficient: float = 0.01) -> list[dict]:
     """对齐 pytdx GetHistoryTransactionData.parseResponse."""

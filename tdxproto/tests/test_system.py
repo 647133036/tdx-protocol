@@ -22,7 +22,8 @@ class TestStockSystem:
         with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:
             q = c.quote("sz000001")
             assert q.code.endswith("000001")
-            assert q.price != 0
+            # 盘外价格可能为 0, 但至少应该有昨收
+            assert q.price > 0 or q.pre_close > 0
 
     def test_kline(self):
         with StockClient(hosts=["60.12.136.250:7709"], use_ip_health=False) as c:
@@ -33,6 +34,25 @@ class TestStockSystem:
         with StockClient() as c:
             pts = c.today_minute("sz000001")
             assert isinstance(pts, list)
+            if pts:
+                assert pts[0].price > 0
+                assert ":" in pts[0].time
+
+    def test_index_minute(self):
+        with StockClient() as c:
+            pts = c.today_minute("sh000001")
+            assert isinstance(pts, list)
+            if pts:
+                assert pts[0].price > 0
+
+    def test_session_helpers(self):
+        from tdxproto import in_trading, session_status, last_session_date
+        assert session_status() in {
+            "pre_market", "auction", "morning", "lunch",
+            "afternoon", "closed", "weekend",
+        }
+        assert isinstance(in_trading(), bool)
+        assert last_session_date() is not None
 
     def test_today_trade(self):
         with StockClient() as c:

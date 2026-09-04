@@ -99,6 +99,17 @@ def _read_response_header(sock: socket.socket) -> tuple[int, int]:
     return zip_len, unzip_len
 
 
+def _recv_all(sock: socket.socket, n: int) -> bytes:
+    """读取确切 n 字节，处理部分读取。"""
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("remote closed")
+        buf.extend(chunk)
+    return bytes(buf)
+
+
 def _handshake_7709(addr: str, port: int, timeout: float) -> tuple[bool, float, str | None]:
     """7709 股票协议握手: 快速验证(仅第1步+count命令, ~50ms)."""
     try:
@@ -111,33 +122,31 @@ def _handshake_7709(addr: str, port: int, timeout: float) -> tuple[bool, float, 
     try:
         # 第 1 步握手 (快速验证)
         sock.sendall(bytes.fromhex("0c 02 18 93 00 01 03 00 03 00 0d 00 01"))
-        
+
         # 消耗第1步响应
         try:
-            magic = sock.recv(4)
-            if not magic:
-                raise ConnectionError("remote closed")
-            hdr = sock.recv(8)
+            magic = _recv_all(sock, 4)
+            hdr = _recv_all(sock, 8)
             zip_len = struct.unpack_from("<H", hdr, 0)[0]
             if zip_len > 0:
-                body = sock.recv(zip_len)
+                body = _recv_all(sock, zip_len)
         except Exception:
             pass
-        
+
         # 发count命令验证服务器可用
         pkg = bytearray.fromhex("0c 0c 18 6c 00 01 08 00 08 00 4e 04")
         pkg.extend(struct.pack("<H", 1))  # market=1 (上海)
         pkg.extend(b"\x75\xc7\x33\x01")
         sock.sendall(bytes(pkg))
-        
+
         # 读取count响应
-        hdr = sock.recv(16)
+        hdr = _recv_all(sock, 16)
         resp_type, c1, c2, zip_len, unzip_len = struct.unpack("<IIIHH", hdr)
-        body = sock.recv(zip_len)
-        
+        body = _recv_all(sock, zip_len)
+
         elapsed = round((time.perf_counter() - started) * 1000, 2)
         return True, elapsed, None
-        
+
     except Exception as e:
         return False, 0, str(e)[:80]
     finally:

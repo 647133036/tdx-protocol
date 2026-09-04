@@ -21,12 +21,12 @@ def compute_factors(bars: list[Kline], equity: list[EquityChange],
     返回 {除权日: 累计因子}。使用日K线数据校验准确性。
     """
     bmap = {date(int(b.time[:4]), int(b.time[4:6]), int(b.time[6:8])): b for b in bars}
-    eq_sorted = sorted([e for e in equity if e.date], key=lambda e: e.date or date.min, reverse=True)
+    eq_sorted = sorted([e for e in equity if e.date], key=lambda e: e.date, reverse=True)
     factor = 1.0
     factors: dict[date, float] = {}
 
     for eq in eq_sorted:
-        if eq.date is None or eq.category != 1:
+        if eq.category != 1:
             continue
         close_before = bmap.get(eq.date)
         if not close_before or close_before.close == 0:

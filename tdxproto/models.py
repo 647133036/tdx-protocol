@@ -57,6 +57,10 @@ class Kline:
     position: int = 0       # 期货持仓量
     settlement: float = 0.0  # 期货结算价
 
+    @property
+    def datetime(self) -> str:
+        return self.time
+
 
 @dataclass
 class Minute:

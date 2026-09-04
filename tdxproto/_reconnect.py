@@ -65,10 +65,8 @@ def select_best_host(
             _FAILOVER_PING_THROTTLE_SEC,
         )
         return None
-    try:
-        ranked = ping_fn(hosts, port, ping_timeout)
-    finally:
-        _mark_failover_done()
+    ranked = ping_fn(hosts, port, ping_timeout)
+    _mark_failover_done()
     for host, _latency in ranked:
         if host != current_host:
             save_fn(host)

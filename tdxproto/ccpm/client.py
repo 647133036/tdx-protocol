@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 
 from .models import CcpmError, CcpmNoDataError, CcpmProductMeta, MemberRank
 
@@ -25,6 +26,7 @@ _CCPM_URL_TEMPLATE = (
     "http://www.cffex.com.cn/sj/hqsj/ccpm/{yearmonth}/{day}/{product}.xml"
 )
 _CACHE_DIR = Path.home() / ".easy_tdx" / "cache" / "ccpm"
+_ALLOWED_HOSTS = frozenset({"www.cffex.com.cn"})
 
 PRODUCT_META: dict[str, CcpmProductMeta] = {
     "IF": CcpmProductMeta(code="IF", name="沪深300股指期货", underlying="CSI 300",
@@ -96,6 +98,12 @@ def _xml_to_ranks(xml_text: str) -> dict[str, list[MemberRank]]:
 
 def _fetch_xml(url: str) -> str:
     """抓取 XML，非交易日或无数据时返回空字符串。"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return ""
+    host = (parsed.hostname or "").lower()
+    if host not in _ALLOWED_HOSTS:
+        return ""
     try:
         req = urlrequest.Request(url, headers={
             "User-Agent": "Mozilla/5.0 (compatible; tdxproto/0.0.1)",

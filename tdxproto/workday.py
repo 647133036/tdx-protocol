@@ -7,7 +7,7 @@
 import sqlite3
 import time
 import threading
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -59,7 +59,7 @@ class WorkdayManager:
         for row in cursor.fetchall():
             try:
                 d = date.fromisoformat(row[0])
-                self._cache[int(datetime(d.year, d.month, d.day).timestamp() // 86400 * 86400)] = True
+                self._cache[int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp())] = True
             except (ValueError, TypeError):
                 continue
     
@@ -94,12 +94,13 @@ class WorkdayManager:
                     y, m, d = int(raw[:4]), int(raw[4:6]), int(raw[6:8])
                     if not (1990 <= y <= 2030 and 1 <= m <= 12 and 1 <= d <= 31):
                         continue
-                    unix_day = int(datetime(y, m, d).timestamp() // 86400 * 86400)
+                    iso = f"{y:04d}-{m:02d}-{d:02d}"
+                    unix_day = int(datetime(y, m, d, tzinfo=timezone.utc).timestamp())
                     if unix_day not in self._cache:
                         self._cache[unix_day] = True
                         cursor.execute(
                             "INSERT INTO workdays (date, unix_time) VALUES (?, ?)",
-                            (str(d), unix_day)
+                            (iso, unix_day)
                         )
                         count += 1
                 except (ValueError, TypeError):
@@ -123,7 +124,7 @@ class WorkdayManager:
         if d is None:
             d = date.today()
         
-        unix_day = int(datetime(d.year, d.month, d.day).timestamp() // 86400 * 86400)
+        unix_day = int(datetime(d.year, d.month, d.day, tzinfo=timezone.utc).timestamp())
         
         with self._lock:
             # 先查缓存

@@ -132,11 +132,16 @@ Entries discovered by the Agent during task execution should follow this format:
   - kline_120m(code, start, count) 聚合两根 60M bar
   - CcpmClient 中金所持仓排名：get_rank/product/latest_rank/get_products_meta，缓存 ~/.easy_tdx/cache/ccpm/
   - verify_qfq(bars, equity) QFQ 交叉验证：formula 计算 vs gap 检测
-  - README 重写（578→150行），版本同步 pyproject.toml / __init__.py / README
+  - 版本同步三处：pyproject.toml / tdxproto/__init__.py / README.md；README 变更记录按版本倒序追加，不删除历史条目；测试统计更新在 README「测试」章节末尾
   - 316 tests pass, 8 skipped（系统测试需外网）
+  - 测试 mock 数据格式：sh000001 是指数，_p_kline 每条末尾多 4 字节；测试时 bars_data 需额外 append struct.pack("<I", 0) 或用 sz000001 跳过；测试 bare except 时用 patch('tdxproto.stock.client.socket.socket')，不用 patch socket.create_connection
 
-[Test: mock 数据格式]
-- Category: Testing Methods
+[Project Knowledge: 港股行情]
+- Date: 2026-09-04
+- Context: Discovered by Agent while integrating HK stock quotes from Tencent API
+- Category: Environment Configuration
 - Instructions:
-  - sh000001 是指数，_p_kline 每条末尾多 4 字节；测试时 bars_data 需额外 append struct.pack("<I", 0) 或用 sz000001 跳过
-  - 测试 bare except 时用 patch('tdxproto.stock.client.socket.socket')，不用 patch socket.create_connection
+  - 腾讯港股 API（qt.gtimg.cn）字段数不稳定（77/78 随机），时间字段是唯一可靠锚点
+  - 正确偏移（相对 time_idx）：high=t+3, low=t+4, volume=t+6, amount=t+7, change_pct=t+2, turnover=t+9, currency=t+45, year_high=t+18, year_low=t+19
+  - 腾讯接口不返回 5 档买卖盘数据（bid/ask 全 0）
+  - SortColumn 枚举值可能与服务器实际映射不符，客户端重排兜底

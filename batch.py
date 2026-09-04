@@ -11,6 +11,9 @@
   # 全市场 A 股
   python batch.py all-stocks --period day --output ./data/
 
+  # 核心龙头池（159 只）
+  python batch.py kline --universe core --period day --output ./data/
+
   # 基准测试
   python batch.py benchmark --codes codes.txt --workers 16
 
@@ -42,8 +45,10 @@ from tdxproto.stock.batch_kline import (
 )
 
 
-def _load_codes(raw: str) -> list[str]:
+def _load_codes(raw: str | None) -> list[str]:
     """从文件或字符串解析代码列表."""
+    if not raw:
+        return []
     if os.path.isfile(raw):
         with open(raw, encoding="utf-8") as f:
             codes = [line.strip() for line in f if line.strip()]
@@ -101,7 +106,11 @@ def _save_csv(results: list[BatchResult], output_dir: str):
 
 
 def cmd_kline(args):
-    codes = _load_codes(args.codes)
+    if getattr(args, "universe", None) == "core":
+        from tdxproto import core_leader_codes
+        codes = core_leader_codes()
+    else:
+        codes = _load_codes(args.codes)
     if not codes:
         print("错误: 代码列表为空"); return
 
@@ -200,7 +209,8 @@ def main():
 
     # kline
     a = sub.add_parser("kline", help="批量采集指定代码的 K 线")
-    a.add_argument("--codes", required=True, help="代码列表文件路径或逗号分隔代码")
+    a.add_argument("--codes", help="代码列表文件路径或逗号分隔代码")
+    a.add_argument("--universe", choices=["core"], help="预置股票池: core=核心龙头 159 只")
     a.add_argument("--period", default="day", help="K 线周期: day/1m/5m/15m/30m/60m/week/month")
     a.add_argument("--output", help="输出目录")
     a.add_argument("--format", choices=["json", "csv"], default="json", help="输出格式")

@@ -2,7 +2,7 @@
 
 Python 3.9+，零外部依赖。原生实现通达信 7709（A 股）、7727（期货）、7615（F10 资讯）和 MAC 板块协议。
 
-版本 **1.1.0**
+版本 **1.1.2**
 
 ## 安装
 
@@ -168,10 +168,12 @@ python -m pytest tdxproto/tests/ -v
 python -m pytest tdxproto/tests/ -v -m "not system"
 ```
 
-316 个用例通过，8 个系统测试跳过（需外网）。
+379 个非系统用例通过；系统测试 8 个通过、8 个跳过（需外网）。
 
 ## 变更记录
 
+- **1.1.2** — 新增 `tdxproto/hk/` 港股行情模块（HkClient/HkQuote，腾讯行情 API，`quote` / `quote_batch`，时间锚点相对定位应对字段波动）；板块排行细化（`board_amount_ranking` / `board_volume_ranking`，服务器端排序 + top_n 截断）；代码审查 9 项修复（gbbq `_parse_bar_date` 替换 `bar.date`、gbbq `get_equity` 取最近非最旧、scanner `_recv_all` 循环读满、web_server 锁内统一检查 + BrokenPipeError、workday 显式 UTC、_reconnect 节流、compute 死代码清理）；安全审查 4 项修复（POST body 上限 1MB、kline_all 上限 5000、codes 上限、`_sanitize_error` 脱敏）
+- **1.1.1** — 对标 easy_tdx 补齐采集能力：新增 `session.py`（交易时段/分时锚定工具：`session_status`、`last_session_date`、`should_use_realtime_minute`、`ashare_minute_labels`、`stamp_minute_times`、`filter_minute_placeholders`）；`today_minute` 盘前/休市自动锚定最近交易日历史分时；指数分时自适应（`is_index_code`；today_minute 3/4 varint 步长、history_minute extra 0/4 字节按完整性与字节消耗打分选择）；`Kline.datetime` 改为 property 别名；`kline_120m` 修复取数数量与奇数对齐；`kline_with_derived` 补充 `time` 键；workday 入库改存 ISO 日期；新增 `universe.py` 核心龙头池 159 只（`core_leader_codes`，batch.py 支持 `--universe core`）。安全加固：cninfo URL 白名单 + PDF 下载路径穿越防护；ccpm `_fetch_xml` 主机白名单；web_server 代码正则收紧
 - **1.1.0** — 新增 CcpmClient（中金所持仓排名 IF/IH/IC/IM/TS/TF/T/TL）；新增 kline_120m（120 分钟 K 线聚合）；新增 verify_qfq（QFQ 交叉验证 formula vs gap）；新增 UNUSUAL_TYPE_NAMES 25 种异常类型 + describe_unusual；修复 stock workday dateutil 依赖；--count > 65535 越界检查前置；tick_chart ETF/bond 系数；index_info 代码提取；K 线下界 1990；短包解析容错；重连 socket 泄漏；_send_recv_quick 超时废弃连接
 - **1.0.8** — 修复 `_recv_response` 中 `zlib.error` 未捕获导致全链路崩溃的根因问题；`finance`/`report_file`/`vol_profile`/`top_board` 分别加固异常处理；`auction` 切换为短超时通道消除 3.6s 重试链；`index_info` 增加备用路径；`main.py` 修正 `finance` 调用方式
 - **1.0.7** — 核心修复：缺失 `pyproject.toml` 导致 `pip install git+...` 静默失败；修复 `KeyError: 0`（`_p_capital_flow` 在 dict 响应上索引崩溃）；修复 `AttributeError: 'Quote' object has no attribute 'get'`；`get_tdx_*` 系列改用 `_send_recv_quick` 消除超时；`chart_sampling`/`history_orders` 超时修复；`vol_profile` 参数优化；`unusual` 前缀过滤修正；`_p_quotes_list` 空响应守卫；`_get_zhb_file` 缓存空结果修复

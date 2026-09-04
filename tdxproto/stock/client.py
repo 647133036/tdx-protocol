@@ -12,11 +12,15 @@ import time
 import threading
 import zipfile
 import zlib
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional, Sequence
 
 from ..codec import split_code, decode_volume, get_price, u32, int_date, normalize_code
 from ..models import EquityChange, Kline, Minute, Trade, Quote, PriceLimit
+from ..session import (
+    filter_minute_placeholders, last_session_date, prev_weekday,
+    should_use_realtime_minute, stamp_minute_times,
+)
 from ..ip_health import get_manager, HostManager
 from .._reconnect import RETRY_DELAYS, select_best_host, find_working_host
 from ..scanner import scan_stock
@@ -39,6 +43,7 @@ from .commands import (
     _b_quotes_encrypt, _b_recent_minute, _b_limits,
     _p_count, _p_list, _p_snapshot, _p_kline, _p_today_minute,
     _p_today_trade, _p_history_minute, _p_history_trade,
+    is_index_code,
     _p_xdxr, _p_finance, _p_company_info_cat, _p_company_info_content,
     _p_block_info_meta, _p_block_info, _p_report_file,
     _p_vol_profile, _p_index_momentum, _p_aux, _p_index_info,
@@ -660,19 +665,18 @@ class StockClient:
 
         协议无此枚举，后端特判：取 60M K 线，两两聚合。
         open=第一根open, high=max, low=min, close=第二根close, vol/amount=sum。
-        奇数根丢弃最旧保最新，最多 400 根（需 800 根 60M）。
+        奇数根丢弃最旧保最新。
         """
-        bars = self.kline(code, "60m", start, start + count * 2 + 1)
+        bars = self.kline(code, "60m", start, count * 2)
         if len(bars) < 2:
             return []
-        # 倒序处理方便取尾部
-        bars = list(reversed(bars))
+        if len(bars) % 2 == 1:
+            bars = bars[1:]
         result = []
         for i in range(0, len(bars) - 1, 2):
             b1, b2 = bars[i], bars[i + 1]
-            dt = b2.datetime
             result.append(Kline(
-                datetime=dt,
+                time=b2.time,
                 open=b1.open,
                 high=max(b1.high, b2.high),
                 low=min(b1.low, b2.low),
@@ -680,7 +684,6 @@ class StockClient:
                 volume=b1.volume + b2.volume,
                 amount=b1.amount + b2.amount,
             ))
-        # 只取最近 count 根
         return result[-count:] if len(result) > count else result
 
     def kline_with_derived(self, code: str, period: str = "day", start: int = 0,
@@ -702,6 +705,7 @@ class StockClient:
             change_pct = (change / pre_close * 100) if pre_close > 0 else 0.0
             amp_pct = ((b.high - b.low) / pre_close * 100) if pre_close > 0 else 0.0
             d = {
+                "time": b.time,
                 "datetime": b.datetime,
                 "open": b.open,
                 "high": b.high,
@@ -745,31 +749,61 @@ class StockClient:
         """股本变迁 (兼容旧接口名)."""
         return self.xdxr(code)
 
-    def today_minute(self, code: str) -> list[Minute]:
-        """今日分时。空数据时自动故障转移到其他主机。"""
+    def today_minute(self, code: str, now: Optional[datetime] = None) -> list[Minute]:
+        """最近交易日分时。盘前/休市自动锚定历史分时，过滤价格 0 占位。"""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
-        data = self._send_recv(_b_today_minute(mid, num))
-        rows = _p_today_minute(data, coefficient=coeff)
-        if not rows and self.auto_reconnect:
-            rows = self._find_host_returning_minute(code, tdate=None)
-        return [Minute(time=str(r.get('minute', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), avg_price=r.get('avg_price', 0.0)) for r in rows]
+        idx = is_index_code(code, mid)
+        if should_use_realtime_minute(now):
+            data = self._send_recv(_b_today_minute(mid, num))
+            rows = _p_today_minute(data, coefficient=coeff, is_idx=idx)
+            if not rows and self.auto_reconnect:
+                rows = self._find_host_returning_minute(code, tdate=None)
+            rows = filter_minute_placeholders(stamp_minute_times(rows))
+            if rows:
+                return self._rows_to_minutes(rows)
+        return self._history_minute_anchored(code, now=now)
 
     def history_minute(self, code: str, tdate) -> list[Minute]:
         """历史分时。空数据时自动故障转移到其他主机。"""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
+        idx = is_index_code(code, mid)
         d = self._parse_tdate(tdate)
         data = self._send_recv(_b_history_minute(mid, num, d))
-        rows = _p_history_minute(data, coefficient=coeff)
+        rows = _p_history_minute(data, coefficient=coeff, is_idx=idx)
         if not rows and self.auto_reconnect:
             rows = self._find_host_returning_minute(code, tdate)
-        return [Minute(time=str(r.get('minute', '')), price=r.get('price', 0), volume=int(r.get('vol', 0)), avg_price=r.get('avg_price', 0.0)) for r in rows]
+        rows = filter_minute_placeholders(stamp_minute_times(rows))
+        return self._rows_to_minutes(rows)
+
+    def _rows_to_minutes(self, rows: list) -> list[Minute]:
+        return [
+            Minute(
+                time=str(r.get("minute", "")),
+                price=r.get("price", 0),
+                volume=int(r.get("vol", 0) or 0),
+                avg_price=r.get("avg_price", 0.0),
+            )
+            for r in rows
+        ]
+
+    def _history_minute_anchored(self, code: str, now: Optional[datetime] = None,
+                                 backtrack: int = 10) -> list[Minute]:
+        """从最近应开盘日向前回溯，拿到非空历史分时。"""
+        d = last_session_date(now)
+        for _ in range(backtrack):
+            rows = self.history_minute(code, d)
+            if rows:
+                return rows
+            d = prev_weekday(d)
+        return []
 
     def _find_host_returning_minute(self, code: str, tdate) -> list:
         """分时数据空数据故障转移。"""
         mid, _, num = split_code(code)
         coeff = self._get_coefficient(mid, num)
+        idx = is_index_code(code, mid)
         is_history = tdate is not None
         d = self._parse_tdate(tdate) if is_history else int(date.today().strftime("%Y%m%d"))
         bad_host = f"{self._current_host}:{self._current_port}"
@@ -788,7 +822,8 @@ class StockClient:
                 s.send(pkg)
                 data = self._recv_response(s)
                 s.close()
-                rows = _p_history_minute(data, coefficient=coeff) if is_history else _p_today_minute(data, coefficient=coeff)
+                rows = (_p_history_minute(data, coefficient=coeff, is_idx=idx)
+                        if is_history else _p_today_minute(data, coefficient=coeff, is_idx=idx))
                 return len(rows) > 0
             except Exception:
                 return False
@@ -801,11 +836,11 @@ class StockClient:
         if is_history:
             pkg = _b_history_minute(mid, num, d)
             data = self._send_recv(pkg)
-            rows = _p_history_minute(data, coefficient=coeff)
+            rows = _p_history_minute(data, coefficient=coeff, is_idx=idx)
         else:
             pkg = _b_today_minute(mid, num)
             data = self._send_recv(pkg)
-            rows = _p_today_minute(data, coefficient=coeff)
+            rows = _p_today_minute(data, coefficient=coeff, is_idx=idx)
         return rows
 
     def today_trade(self, code: str, start: int = 0, count: int = 115) -> list[Trade]:
@@ -1387,6 +1422,38 @@ class StockClient:
         try:
             mac.connect()
             return mac.board_change_ranking(board_type, days, top_n, sort_order)
+        finally:
+            mac.close()
+
+    def board_amount_ranking(
+        self,
+        board_type: int = 0,
+        top_n: int = 100,
+        sort_order: int = 1,
+    ) -> list[dict]:
+        """获取板块成交额排行."""
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.board_amount_ranking(board_type, top_n, sort_order)
+        finally:
+            mac.close()
+
+    def board_volume_ranking(
+        self,
+        board_type: int = 0,
+        top_n: int = 100,
+        sort_order: int = 1,
+    ) -> list[dict]:
+        """获取板块成交量排行."""
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.board_volume_ranking(board_type, top_n, sort_order)
         finally:
             mac.close()
 
