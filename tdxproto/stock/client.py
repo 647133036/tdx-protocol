@@ -1457,6 +1457,27 @@ class StockClient:
         finally:
             mac.close()
 
+    def board_main_net_amount_ranking(
+        self,
+        board_type: int = 0,
+        top_n: int = 100,
+        sort_order: int = 1,
+    ) -> list[dict]:
+        """获取板块主力净流入排行.
+
+        正值 = 净流入，负值 = 净流出。
+        sort_order=1 (DESC) 净流入最多在前；
+        sort_order=0 (ASC) 净流出最多在前。
+        """
+        if not _HAS_MAC:
+            raise RuntimeError("MAC 模块不可用")
+        mac = MacClient(timeout=self.timeout)
+        try:
+            mac.connect()
+            return mac.board_main_net_amount_ranking(board_type, top_n, sort_order)
+        finally:
+            mac.close()
+
     def quote_list(
         self,
         category: int,

@@ -207,15 +207,16 @@ class MacClient:
     ) -> list[dict]:
         """按成交额获取板块排行.
 
-        通过 board_list 请求服务器按成交额排序，返回 top_n 条.
+        通过 board_list + board_summary 组合获取完整数据，
+        客户端按 amount 排序返回 top_n 条.
         """
-        boards = self.board_list(
-            page_size=300,
+        boards = self._board_ranking_by(
             board_type=board_type,
-            sort_column=SortColumn.AMOUNT,
+            sort_field="amount",
+            top_n=top_n,
             sort_order=sort_order,
         )
-        return boards[:top_n]
+        return boards
 
     def board_volume_ranking(
         self,
@@ -224,13 +225,70 @@ class MacClient:
         sort_order: int = SortOrder.DESC,
     ) -> list[dict]:
         """按成交量获取板块排行."""
-        boards = self.board_list(
-            page_size=300,
+        return self._board_ranking_by(
             board_type=board_type,
-            sort_column=SortColumn.VOL,
+            sort_field="vol",
+            top_n=top_n,
             sort_order=sort_order,
         )
-        return boards[:top_n]
+
+    def board_main_net_amount_ranking(
+        self,
+        board_type: int = 0,
+        top_n: int = 100,
+        sort_order: int = SortOrder.DESC,
+    ) -> list[dict]:
+        """按主力净流入获取板块排行.
+
+        正值 = 主力净流入，负值 = 主力净流出。
+        DESC = 净流入最多在前，ASC = 净流出最多在前。
+        """
+        return self._board_ranking_by(
+            board_type=board_type,
+            sort_field="main_net_amount",
+            top_n=top_n,
+            sort_order=sort_order,
+        )
+
+    def _board_ranking_by(
+        self,
+        board_type: int = 0,
+        sort_field: str = "amount",
+        top_n: int = 100,
+        sort_order: int = SortOrder.DESC,
+    ) -> list[dict]:
+        """通用板块排行：board_list 获取代码，board_summary 获取资金数据，客户端排序.
+
+        为控制请求量，最多查询 100 个板块的 board_summary。
+        """
+        boards = self.board_list(
+            page_size=100,
+            board_type=board_type,
+        )
+        enriched: list[dict] = []
+        for b in boards:
+            code = b.get("code")
+            if not code:
+                continue
+            try:
+                summary = self.board_summary(code)
+                enriched.append({
+                    "code": code,
+                    "name": b.get("name", ""),
+                    "price": b.get("price", 0),
+                    "change_pct": b.get("rise_speed", 0),
+                    "amount": summary.get("amount", 0),
+                    "vol": summary.get("vol", 0),
+                    "main_net_amount": summary.get("main_net_amount", 0),
+                    "up_count": summary.get("up_count", 0),
+                    "down_count": summary.get("down_count", 0),
+                    "member_count": summary.get("member_count", 0),
+                })
+            except Exception:
+                continue
+        reverse = (sort_order == SortOrder.DESC)
+        enriched.sort(key=lambda x: x.get(sort_field, 0) or 0, reverse=reverse)
+        return enriched[:top_n]
 
     def category_quotes(
         self,
