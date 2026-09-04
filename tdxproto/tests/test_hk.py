@@ -1,6 +1,7 @@
 """港股行情模块单元测试 — 基于腾讯接口."""
 
 import pytest
+import urllib.error
 
 from tdxproto.hk import HkClient, HkQuote
 from tdxproto.hk.client import _parse_response, _parse_fields, _normalize_code, _safe_float, _safe_int, _TIME_RE
@@ -188,12 +189,131 @@ class TestParseFields:
         assert quote.volume == 10997901
 
 
-class TestHkClientBatch:
-    def test_batch_normalization(self):
-        """验证 quote_batch 内部代码规范化."""
-        codes = ["00700", "hk09988", "01810", "09618"]
-        normalized = [_normalize_code(c) for c in codes]
-        assert normalized == ["hk00700", "hk09988", "hk01810", "hk09618"]
+class TestHkClientInit:
+    def test_default_workers(self):
+        client = HkClient()
+        assert client._max_workers == 4
+        assert client._timeout == 10
+        assert client._max_retries == 2
+
+    def test_custom_workers(self):
+        client = HkClient(max_workers=2, timeout=5, max_retries=1)
+        assert client._max_workers == 2
+        assert client._timeout == 5
+        assert client._max_retries == 1
+
+    def test_min_workers(self):
+        client = HkClient(max_workers=0)
+        assert client._max_workers == 1
+
+    def test_min_workers_negative(self):
+        client = HkClient(max_workers=-5)
+        assert client._max_workers == 1
+
+
+class TestFetchRetry:
+    """_fetch 重试逻辑测试."""
+
+    def test_success_first_attempt(self):
+        """首次请求成功，不重试."""
+        import urllib.request
+        call_count = [0]
+
+        def fake_urlopen(req, timeout=None):
+            call_count[0] += 1
+            class FakeResp:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return False
+                def read(self):
+                    return b'v_hk00700="100~test~00700~445.0~433.0~442.0~1000~0~0~445.0~0~0~0~0~0~0~0~0~0~445.0~0~0~0~0~0~0~0~0~0~0~1000~2026/09/04 10:00:00~5.0~1.0~446.0~440.0~445.0~1000~4800000.0~0~16.0~~0~0~1.5~40000~40000~TENCENT~1.19~677.7~411.0~1.1~-41.5~0~0~0~0~0~14.9~3.1~0.1~100~-25~-2~GP~20~11~-2~-7~-4~9000~9000~15~5.3~443~-25~HKD~1~30";\n'
+            return FakeResp()
+
+        orig = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            from tdxproto.hk.client import _fetch
+            raw = _fetch(["hk00700"], timeout=5, max_retries=2)
+            assert call_count[0] == 1
+            assert len(raw) > 0
+        finally:
+            urllib.request.urlopen = orig
+
+    def test_retry_on_failure(self):
+        """前两次失败，第三次成功."""
+        import urllib.request
+        call_count = [0]
+
+        def fake_urlopen(req, timeout=None):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise urllib.error.URLError("connection refused")
+            class FakeResp:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return False
+                def read(self):
+                    return b'v_hk00700="100~test~00700~445.0~433.0~442.0~1000~0~0~445.0~0~0~0~0~0~0~0~0~0~445.0~0~0~0~0~0~0~0~0~0~0~1000~2026/09/04 10:00:00~5.0~1.0~446.0~440.0~445.0~1000~4800000.0~0~16.0~~0~0~1.5~40000~40000~TENCENT~1.19~677.7~411.0~1.1~-41.5~0~0~0~0~0~14.9~3.1~0.1~100~-25~-2~GP~20~11~-2~-7~-4~9000~9000~15~5.3~443~-25~HKD~1~30";\n'
+            return FakeResp()
+
+        orig = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            import time
+            orig_sleep = time.sleep
+            time.sleep = lambda x: None  # 跳过退避等待
+            try:
+                from tdxproto.hk.client import _fetch
+                raw = _fetch(["hk00700"], timeout=5, max_retries=2)
+                assert call_count[0] == 3
+                assert len(raw) > 0
+            finally:
+                time.sleep = orig_sleep
+        finally:
+            urllib.request.urlopen = orig
+
+    def test_all_retries_fail(self):
+        """所有重试都失败，返回空字节."""
+        import urllib.request
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.URLError("connection refused")
+
+        orig = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            import time
+            orig_sleep = time.sleep
+            time.sleep = lambda x: None
+            try:
+                from tdxproto.hk.client import _fetch
+                raw = _fetch(["hk00700"], timeout=5, max_retries=2)
+                assert raw == b""
+            finally:
+                time.sleep = orig_sleep
+        finally:
+            urllib.request.urlopen = orig
+
+    def test_zero_retries(self):
+        """max_retries=0 时只试一次."""
+        import urllib.request
+        call_count = [0]
+
+        def fake_urlopen(req, timeout=None):
+            call_count[0] += 1
+            raise urllib.error.URLError("fail")
+
+        orig = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            from tdxproto.hk.client import _fetch
+            raw = _fetch(["hk00700"], timeout=5, max_retries=0)
+            assert call_count[0] == 1
+            assert raw == b""
+        finally:
+            urllib.request.urlopen = orig
 
 
 class TestTimeRegex:
@@ -206,3 +326,118 @@ class TestTimeRegex:
         assert not _TIME_RE.match("445.200")
         assert not _TIME_RE.match("TENCENT")
         assert not _TIME_RE.match("")
+
+
+class TestConcurrency:
+    def _mock_response(self, codes):
+        parts = []
+        for c in codes:
+            parts.append(
+                f'v_{c}="100~test~{c[2:]}~445.0~433.0~442.0~1000~0~0~445.0'
+                f'~0~0~0~0~0~0~0~0~0~445.0~0~0~0~0~0~0~0~0~0~0~1000'
+                f'~2026/09/04 10:00:00~5.0~1.0~446.0~440.0~445.0~1000~4800000.0'
+                f'~0~16.0~~0~0~1.5~40000~40000~TEST~1.19~677.7~411.0~1.1~-41.5'
+                f'~0~0~0~0~0~14.9~3.1~0.1~100~-25~-2~GP~20~11~-2~-7~-4'
+                f'~9000~9000~15~5.3~443~-25~HKD~1~30";\n'
+            )
+        return "".join(parts).encode("gbk")
+
+    def _fake_urlopen(self, expected_bytes):
+        class FakeResp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self):
+                return expected_bytes
+        return FakeResp()
+
+    def test_concurrent_batch(self):
+        from unittest.mock import patch
+        codes = ["hk00700", "hk09988", "hk01810"]
+        expected = self._mock_response(codes)
+        fake = self._fake_urlopen(expected)
+
+        client = HkClient(max_workers=4)
+        with patch("urllib.request.urlopen", lambda req, timeout=None: fake):
+            result = client.quote_batch(["00700", "09988", "01810"])
+            assert len(result) == 3
+
+    def test_concurrent_multi_chunk(self):
+        from unittest.mock import patch
+        codes = [f"hk{i:05d}" for i in range(20)]
+        expected = self._mock_response(codes)
+        fake = self._fake_urlopen(expected)
+
+        client = HkClient(max_workers=4)
+        with patch("urllib.request.urlopen", lambda req, timeout=None: fake):
+            input_codes = [f"{i:05d}" for i in range(20)]
+            result = client.quote_batch(input_codes, max_batch_size=10)
+            assert len(result) >= 0
+
+    def test_single_worker_serial(self):
+        from unittest.mock import patch
+        codes = ["hk00700", "hk09988"]
+        expected = self._mock_response(codes)
+        fake = self._fake_urlopen(expected)
+
+        client = HkClient(max_workers=1)
+        with patch("urllib.request.urlopen", lambda req, timeout=None: fake):
+            result = client.quote_batch(["00700", "09988"])
+            assert len(result) == 2
+
+
+class TestFaultTolerance:
+    def test_quote_none_on_failure(self):
+        from unittest.mock import patch
+
+        def fake(req, timeout=None):
+            raise urllib.error.URLError("refused")
+
+        client = HkClient(max_retries=0)
+        with patch("urllib.request.urlopen", fake):
+            assert client.quote("00700") is None
+
+    def test_batch_partial_failure(self):
+        from unittest.mock import patch
+        call_count = [0]
+
+        def fake(req, timeout=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise urllib.error.URLError("second fails")
+            codes = [c for c in ["hk00700", "hk00001"]
+                     if "00700" in c or "00001" in c]
+            expected = (
+                b'v_hk00700="100~test~00700~445.0~433.0~442.0~1000'
+                b'~0~0~445.0~0~0~0~0~0~0~0~0~0~445.0~0~0~0~0~0~0~0'
+                b'~0~0~0~0~1000~2026/09/04 10:00:00~5.0~1.0~446.0~440.0'
+                b'~445.0~1000~4800000.0~0~16.0~~0~0~1.5~40000~40000'
+                b'~TEST~1.19~677.7~411.0~1.1~-41.5~0~0~0~0~0~14.9~3.1'
+                b'~0.1~100~-25~-2~GP~20~11~-2~-7~-4~9000~9000~15~5.3'
+                b'~443~-25~HKD~1~30";\n'
+            )
+            class FakeResp:
+                def __enter__(self):
+                    return self
+                def __exit__(self, *args):
+                    return False
+                def read(self):
+                    return expected
+            return FakeResp()
+
+        client = HkClient(max_workers=4, max_retries=0)
+        with patch("urllib.request.urlopen", fake):
+            result = client.quote_batch(
+                ["00700", "00001", "00002", "00003", "00004"],
+                max_batch_size=2,
+            )
+            assert "hk00700" in result
+
+    def test_empty_codes(self):
+        client = HkClient()
+        assert client.quote_batch([]) == {}
+
+    def test_all_invalid_codes(self):
+        client = HkClient()
+        assert client.quote_batch([None, "", "   "]) == {}

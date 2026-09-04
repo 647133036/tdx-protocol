@@ -1,25 +1,32 @@
 """港股实时报价 — 腾讯行情接口.
 
 数据源：腾讯行情 API (qt.gtimg.cn), 零依赖纯标准库实现。
-格式与 A 股腾讯格式一致，仅 code 前缀为 "hk"。
+支持并发批量查询、指数退避重试、超时降级。
+
+线程安全：HkClient 所有方法可并发调用（无共享可变状态）。
 """
 
 from __future__ import annotations
 
-import json
+import logging
 import re
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Optional
 
 __all__ = ["HkClient", "HkQuote"]
+
+logger = logging.getLogger(__name__)
 
 _QT_URL = "https://qt.gtimg.cn/q={codes}"
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Referer": "https://xueqiu.com/",
     "Accept": "text/html,application/xhtml+xml",
+    "Connection": "close",
 }
 
 
@@ -51,12 +58,31 @@ class HkQuote:
     eps: float = 0.0
 
 
-def _fetch(code_list: list[str]) -> bytes:
+def _fetch(
+    code_list: list[str],
+    timeout: float = 10,
+    max_retries: int = 2,
+) -> bytes:
+    """带重试的 HTTP 请求（指数退避）."""
     raw_codes = ",".join(code_list)
     url = _QT_URL.format(codes=raw_codes)
-    req = urllib.request.Request(url, headers=_HEADERS)
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return resp.read()
+    last_err: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            req = urllib.request.Request(url, headers=_HEADERS)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            last_err = e
+            if attempt < max_retries:
+                wait = 0.5 * (2 ** attempt)
+                logger.warning(
+                    "hk fetch attempt %d/%d failed: %s; retrying in %.1fs",
+                    attempt + 1, max_retries + 1, e, wait,
+                )
+                time.sleep(wait)
+    logger.error("hk fetch failed after %d attempts: %s", max_retries + 1, last_err)
+    return b""
 
 
 _FIELD_RE = re.compile(r'^v_(\w+)="(.*)";?\s*$')
@@ -181,41 +207,89 @@ def _normalize_code(code: str | None) -> str | None:
 class HkClient:
     """港股行情客户端 — 基于腾讯接口.
 
+    支持并发批量查询（线程池）+ 指数退避重试。
+
+    参数：
+        max_workers: 并发线程数，默认 4。设为 1 退化为串行。
+        timeout: 单次请求超时秒数，默认 10。
+        max_retries: 失败重试次数，默认 2。
+
     使用示例：
         from tdxproto import HkClient
         client = HkClient()
         q = client.quote("00700")
         print(q.name, q.price)
 
-        # 批量
+        # 批量（并发）
         batch = client.quote_batch(["00700", "09988", "01810"])
         for code, q in batch.items():
             print(code, q.name, q.price)
     """
+
+    def __init__(
+        self,
+        max_workers: int = 4,
+        timeout: float = 10,
+        max_retries: int = 2,
+    ) -> None:
+        self._max_workers = max(1, max_workers)
+        self._timeout = timeout
+        self._max_retries = max_retries
 
     def quote(self, code: str) -> Optional[HkQuote]:
         """获取单只港股实时报价."""
         norm = _normalize_code(code)
         if not norm:
             return None
-        raw = _fetch([norm])
+        raw = _fetch([norm], self._timeout, self._max_retries)
+        if not raw:
+            return None
         parsed = _parse_response(raw)
         fields = parsed.get(norm, [])
         return _parse_fields(fields, norm[2:]) if fields else None
 
     def quote_batch(
-        self, codes: list[str], max_batch_size: int = 80
+        self,
+        codes: list[str],
+        max_batch_size: int = 80,
     ) -> dict[str, HkQuote]:
-        """批量获取港股报价."""
+        """并发批量获取港股报价.
+
+        将 codes 按 max_batch_size 分块，使用线程池并发请求。
+        """
         normalized = [_normalize_code(c) for c in codes]
         normalized = [n for n in normalized if n]
+        if not normalized:
+            return {}
+
+        chunks: list[list[str]] = [
+            normalized[i : i + max_batch_size]
+            for i in range(0, len(normalized), max_batch_size)
+        ]
         result: dict[str, HkQuote] = {}
-        for i in range(0, len(normalized), max_batch_size):
-            chunk = normalized[i : i + max_batch_size]
-            raw = _fetch(chunk)
-            parsed = _parse_response(raw)
-            for sym, fields in parsed.items():
-                quote = _parse_fields(fields, sym[2:])
-                if quote:
-                    result[sym] = quote
+
+        if len(chunks) == 1 or self._max_workers <= 1:
+            for chunk in chunks:
+                result.update(self._fetch_chunk(chunk))
+        else:
+            with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+                futures = {
+                    pool.submit(self._fetch_chunk, chunk): chunk
+                    for chunk in chunks
+                }
+                for future in as_completed(futures):
+                    result.update(future.result())
+        return result
+
+    def _fetch_chunk(self, chunk: list[str]) -> dict[str, HkQuote]:
+        """请求一个 chunk 并返回结果."""
+        raw = _fetch(chunk, self._timeout, self._max_retries)
+        if not raw:
+            return {}
+        parsed = _parse_response(raw)
+        result: dict[str, HkQuote] = {}
+        for sym, fields in parsed.items():
+            quote = _parse_fields(fields, sym[2:])
+            if quote:
+                result[sym] = quote
         return result
