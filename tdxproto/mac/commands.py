@@ -318,6 +318,7 @@ def _b_board_members_quotes(board_code: str | int, page_size: int = 80,
 
 _INT_FIELD_BITS = {
     FieldBit.VOL,
+    FieldBit.RISE_SPEED,
     FieldBit.UP_COUNT,
     FieldBit.DOWN_COUNT,
     FieldBit.FLAT_COUNT,
@@ -336,6 +337,19 @@ _MONEY_FIELD_BITS = {
     FieldBit.MAIN_NET_BUY,
     FieldBit.MAIN_NET_SELL,
 }
+
+# 板块成分股字段解析顺序（服务器固定返回顺序）
+_BOARD_MEMBERS_FIELD_ORDER = [
+    FieldBit.PRE_CLOSE,
+    FieldBit.CLOSE,
+    FieldBit.VOL,
+    FieldBit.AMOUNT,
+    FieldBit.PRICE,
+    FieldBit.RISE_SPEED,
+    FieldBit.MAIN_NET_AMOUNT,
+    FieldBit.UP_COUNT,
+    FieldBit.DOWN_COUNT,
+]
 
 
 def _p_board_members_quotes(data: bytes, coefficient: float = 0.01) -> list[dict]:
@@ -362,51 +376,53 @@ def _p_board_members_quotes(data: bytes, coefficient: float = 0.01) -> list[dict
         name = name_b.decode("gbk", errors="replace").strip("\x00")
 
         row_data = {"market": market, "code": code, "name": name}
-        field_values = []
-        for field_bit in active_fields:
-            if pos + 4 <= len(data):
-                if field_bit in _INT_FIELD_BITS:
-                    val = struct.unpack_from("<I", data, pos)[0]
-                else:
-                    val = struct.unpack_from("<f", data, pos)[0]
-                field_values.append(val)
-                pos += 4
+        
+        name_map = {
+            FieldBit.PRE_CLOSE: "pre_close",
+            FieldBit.CLOSE: "close",
+            FieldBit.OPEN: "open",
+            FieldBit.HIGH: "high",
+            FieldBit.LOW: "low",
+            FieldBit.VOL: "vol",
+            FieldBit.AMOUNT: "amount",
+            FieldBit.PRICE: "price",
+            FieldBit.RISE_SPEED: "rise_speed",
+            FieldBit.MAIN_NET_AMOUNT: "main_net_amount",
+            FieldBit.NET_MAJOR_ORDER: "net_major_order",
+            FieldBit.NET_MID_ORDER: "net_mid_order",
+            FieldBit.NET_SMALL_ORDER: "net_small_order",
+            FieldBit.UP_COUNT: "up_count",
+            FieldBit.DOWN_COUNT: "down_count",
+            FieldBit.FLAT_COUNT: "flat_count",
+            FieldBit.UP_LIMIT: "up_limit",
+            FieldBit.DOWN_LIMIT: "down_limit",
+            FieldBit.AMPLITUDE: "amplitude",
+            FieldBit.TURNOVER_RATE: "turnover_rate",
+            FieldBit.SERVER_TIME: "server_time",
+        }
+        
+        # 按预期顺序解析字段
+        active_set = set(active_fields)
+        for field_bit in _BOARD_MEMBERS_FIELD_ORDER:
+            if field_bit not in active_set:
+                continue
+            if pos + 4 > len(data):
+                break
+            if field_bit in _INT_FIELD_BITS:
+                val = struct.unpack_from("<I", data, pos)[0]
             else:
-                field_values.append(0)
-
-        for i, field_bit in enumerate(active_fields):
-            if i < len(field_values):
-                name_map = {
-                    FieldBit.PRICE: "price",
-                    FieldBit.CLOSE: "close",
-                    FieldBit.OPEN: "open",
-                    FieldBit.HIGH: "high",
-                    FieldBit.LOW: "low",
-                    FieldBit.PRE_CLOSE: "pre_close",
-                    FieldBit.VOL: "vol",
-                    FieldBit.AMOUNT: "amount",
-                    FieldBit.RISE_SPEED: "rise_speed",
-                    FieldBit.MAIN_NET_AMOUNT: "main_net_amount",
-                    FieldBit.NET_MAJOR_ORDER: "net_major_order",
-                    FieldBit.NET_MID_ORDER: "net_mid_order",
-                    FieldBit.NET_SMALL_ORDER: "net_small_order",
-                    FieldBit.UP_COUNT: "up_count",
-                    FieldBit.DOWN_COUNT: "down_count",
-                    FieldBit.FLAT_COUNT: "flat_count",
-                    FieldBit.UP_LIMIT: "up_limit",
-                    FieldBit.DOWN_LIMIT: "down_limit",
-                    FieldBit.AMPLITUDE: "amplitude",
-                    FieldBit.TURNOVER_RATE: "turnover_rate",
-                    FieldBit.SERVER_TIME: "server_time",
-                }
-                key = name_map.get(field_bit, f"field_{field_bit}")
-                val = field_values[i]
-                if field_bit in _MONEY_FIELD_BITS:
-                    val = val * coefficient
-                if isinstance(val, float):
-                    row_data[key] = round(val, 3)
-                else:
-                    row_data[key] = val
+                val = struct.unpack_from("<f", data, pos)[0]
+            pos += 4
+            key = name_map.get(field_bit, f"field_{field_bit}")
+            if field_bit in _MONEY_FIELD_BITS:
+                val = val * coefficient
+            # RISE_SPEED 以基点存储 (0.01%)，转换为百分比
+            if field_bit == FieldBit.RISE_SPEED:
+                val = val / 10000.0
+            if isinstance(val, float):
+                row_data[key] = round(val, 3)
+            else:
+                row_data[key] = val
 
         results.append(row_data)
 
