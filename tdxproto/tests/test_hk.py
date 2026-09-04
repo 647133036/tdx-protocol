@@ -18,6 +18,17 @@ class TestSafeParse:
         assert _safe_float("abc") == 0.0
         assert _safe_float("-") == 0.0
 
+    def test_safe_float_nan_inf(self):
+        assert _safe_float("nan") == 0.0
+        assert _safe_float("inf") == 0.0
+        assert _safe_float("-inf") == 0.0
+
+    def test_safe_float_whitespace(self):
+        assert _safe_float("  12.34  ") == 12.34
+
+    def test_safe_float_negative(self):
+        assert _safe_float("-5.5") == -5.5
+
     def test_safe_int_ok(self):
         assert _safe_int("42") == 42
         assert _safe_int("42.5") == 42
@@ -27,6 +38,11 @@ class TestSafeParse:
 
     def test_safe_int_negative(self):
         assert _safe_int("-5") == -5
+
+    def test_safe_int_nan_inf(self):
+        assert _safe_int("nan") == 0
+        assert _safe_int("inf") == 0
+        assert _safe_int("-inf") == 0
 
 
 class TestNormalizeCode:
@@ -40,6 +56,13 @@ class TestNormalizeCode:
     def test_uppercase(self):
         assert _normalize_code("HK00700") == "hk00700"
         assert _normalize_code("00700 ") == "hk00700"
+
+    def test_none(self):
+        assert _normalize_code(None) is None
+
+    def test_empty_string(self):
+        assert _normalize_code("") is None
+        assert _normalize_code("   ") is None
 
 
 class TestParseResponse:

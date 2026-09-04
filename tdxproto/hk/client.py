@@ -79,15 +79,21 @@ def _parse_response(raw: bytes) -> dict[str, list[str]]:
 
 def _safe_float(v: str, default: float = 0.0) -> float:
     try:
-        return float(v)
-    except (ValueError, TypeError):
+        f = float(v)
+        if f != f or f in (float("inf"), float("-inf")):
+            return default
+        return f
+    except (ValueError, TypeError, OverflowError):
         return default
 
 
 def _safe_int(v: str, default: int = 0) -> int:
     try:
-        return int(float(v))
-    except (ValueError, TypeError):
+        f = float(v)
+        if f != f or f in (float("inf"), float("-inf")):
+            return default
+        return int(f)
+    except (ValueError, TypeError, OverflowError):
         return default
 
 
@@ -161,8 +167,12 @@ def _parse_fields(fields: list[str], code: str) -> Optional[HkQuote]:
     )
 
 
-def _normalize_code(code: str) -> str:
+def _normalize_code(code: str | None) -> str | None:
+    if not code:
+        return None
     code = code.strip().lower()
+    if not code:
+        return None
     if not code.startswith("hk"):
         code = "hk" + code
     return code
@@ -186,6 +196,8 @@ class HkClient:
     def quote(self, code: str) -> Optional[HkQuote]:
         """获取单只港股实时报价."""
         norm = _normalize_code(code)
+        if not norm:
+            return None
         raw = _fetch([norm])
         parsed = _parse_response(raw)
         fields = parsed.get(norm, [])
@@ -196,6 +208,7 @@ class HkClient:
     ) -> dict[str, HkQuote]:
         """批量获取港股报价."""
         normalized = [_normalize_code(c) for c in codes]
+        normalized = [n for n in normalized if n]
         result: dict[str, HkQuote] = {}
         for i in range(0, len(normalized), max_batch_size):
             chunk = normalized[i : i + max_batch_size]
