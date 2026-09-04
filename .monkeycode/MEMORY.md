@@ -143,5 +143,18 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - 腾讯港股 API（qt.gtimg.cn）字段数不稳定（77/78 随机），时间字段是唯一可靠锚点
   - 正确偏移（相对 time_idx）：high=t+3, low=t+4, volume=t+6, amount=t+7, change_pct=t+2, turnover=t+9, currency=t+45, year_high=t+18, year_low=t+19
-  - 腾讯接口不返回 5 档买卖盘数据（bid/ask 全 0）
-  - SortColumn 枚举值可能与服务器实际映射不符，客户端重排兜底
+   - 腾讯接口不返回 5 档买卖盘数据（bid/ask 全 0）
+   - SortColumn 枚举值可能与服务器实际映射不符，客户端重排兜底
+
+[Project Knowledge: 板块成分股字段解析]
+- Date: 2026-09-04
+- Context: Discovered by Agent while fixing board_members_quotes field parsing
+- Category: Troubleshooting & Debugging
+- Instructions:
+   - 服务器按固定顺序返回字段（非 bitmap 位序），需按 _BOARD_MEMBERS_FIELD_ORDER 解析
+   - 预期顺序: [PRE_CLOSE, CLOSE, VOL, AMOUNT, PRICE, RISE_SPEED, MAIN_NET_AMOUNT, UP_COUNT, DOWN_COUNT]
+   - VOL 和 RISE_SPEED 存储为 INT（非 FLOAT），需加入 _INT_FIELD_BITS
+   - RISE_SPEED 以基点存储 (0.01%)，解析后除以 10000 转换为百分比
+   - MAIN_NET_AMOUNT 服务器返回固定值 6.0 万元（所有成员相同），疑似不支持该字段
+   - UP_COUNT/DOWN_COUNT 返回日期/时间戳（20260904/150500），非上涨/下跌家数
+   - capital_flow 命令号 0x1218 (ctrl=2)，返回 JSON 格式（非 bitmap 格式）
