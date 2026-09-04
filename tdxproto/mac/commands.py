@@ -318,12 +318,23 @@ def _b_board_members_quotes(board_code: str | int, page_size: int = 80,
 
 _INT_FIELD_BITS = {
     FieldBit.VOL,
-    FieldBit.RISE_SPEED,
     FieldBit.UP_COUNT,
     FieldBit.DOWN_COUNT,
     FieldBit.FLAT_COUNT,
-    FieldBit.TURNOVER_RATE,
     FieldBit.SERVER_TIME,
+}
+
+# 金额字段（单位：万元），解析时乘以 coefficient 转换为亿元
+_MONEY_FIELD_BITS = {
+    FieldBit.AMOUNT,
+    FieldBit.MAIN_NET_AMOUNT,
+    FieldBit.NET_MAJOR_ORDER,
+    FieldBit.NET_MID_ORDER,
+    FieldBit.NET_SMALL_ORDER,
+    FieldBit.MIN2_AMOUNT,
+    FieldBit.OPENING_RUSH,
+    FieldBit.MAIN_NET_BUY,
+    FieldBit.MAIN_NET_SELL,
 }
 
 
@@ -390,6 +401,8 @@ def _p_board_members_quotes(data: bytes, coefficient: float = 0.01) -> list[dict
                 }
                 key = name_map.get(field_bit, f"field_{field_bit}")
                 val = field_values[i]
+                if field_bit in _MONEY_FIELD_BITS:
+                    val = val * coefficient
                 if isinstance(val, float):
                     row_data[key] = round(val, 3)
                 else:
