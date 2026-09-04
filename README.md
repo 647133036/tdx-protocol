@@ -2,7 +2,7 @@
 
 Python 3.9+，零外部依赖。原生实现通达信 7709（A 股）、7727（期货）、7615（F10 资讯）和 MAC 板块协议。
 
-版本 **1.1.2**
+版本 **1.1.3**
 
 ## 安装
 
@@ -172,6 +172,7 @@ python -m pytest tdxproto/tests/ -v -m "not system"
 
 ## 变更记录
 
+- **1.1.3** — 修复板块成分股字段解析顺序与类型：新增 `_BOARD_MEMBERS_FIELD_ORDER` 按预期顺序解析（PRE_CLOSE/CLOSE/VOL/AMOUNT/PRICE/RISE_SPEED/MAIN_NET_AMOUNT/UP_COUNT/DOWN_COUNT）；RISE_SPEED 加入 `_INT_FIELD_BITS` 并转换为百分比（基点/10000）；VOL 正确读取为 INT 类型；测试 407 passed
 - **1.1.2** — 新增 `tdxproto/hk/` 港股行情模块（HkClient/HkQuote，腾讯行情 API，`quote` / `quote_batch`，时间锚点相对定位应对字段波动）；板块排行细化（`board_amount_ranking` / `board_volume_ranking`，服务器端排序 + top_n 截断）；代码审查 9 项修复（gbbq `_parse_bar_date` 替换 `bar.date`、gbbq `get_equity` 取最近非最旧、scanner `_recv_all` 循环读满、web_server 锁内统一检查 + BrokenPipeError、workday 显式 UTC、_reconnect 节流、compute 死代码清理）；安全审查 4 项修复（POST body 上限 1MB、kline_all 上限 5000、codes 上限、`_sanitize_error` 脱敏）
 - **1.1.1** — 对标 easy_tdx 补齐采集能力：新增 `session.py`（交易时段/分时锚定工具：`session_status`、`last_session_date`、`should_use_realtime_minute`、`ashare_minute_labels`、`stamp_minute_times`、`filter_minute_placeholders`）；`today_minute` 盘前/休市自动锚定最近交易日历史分时；指数分时自适应（`is_index_code`；today_minute 3/4 varint 步长、history_minute extra 0/4 字节按完整性与字节消耗打分选择）；`Kline.datetime` 改为 property 别名；`kline_120m` 修复取数数量与奇数对齐；`kline_with_derived` 补充 `time` 键；workday 入库改存 ISO 日期；新增 `universe.py` 核心龙头池 159 只（`core_leader_codes`，batch.py 支持 `--universe core`）。安全加固：cninfo URL 白名单 + PDF 下载路径穿越防护；ccpm `_fetch_xml` 主机白名单；web_server 代码正则收紧
 - **1.1.0** — 新增 CcpmClient（中金所持仓排名 IF/IH/IC/IM/TS/TF/T/TL）；新增 kline_120m（120 分钟 K 线聚合）；新增 verify_qfq（QFQ 交叉验证 formula vs gap）；新增 UNUSUAL_TYPE_NAMES 25 种异常类型 + describe_unusual；修复 stock workday dateutil 依赖；--count > 65535 越界检查前置；tick_chart ETF/bond 系数；index_info 代码提取；K 线下界 1990；短包解析容错；重连 socket 泄漏；_send_recv_quick 超时废弃连接
