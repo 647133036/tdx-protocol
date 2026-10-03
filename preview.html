@@ -234,8 +234,7 @@ function showSummary(containerId, items) {
 }
 
 function showQuoteDetail(containerId, q) {
-  const fields = ["code","name","price","pre_close","open","high","low","volume","amount",
-                  "bid1","ask1","bid_vol1","ask_vol1"];
+  const fields = ["code","name","price","pre_close","open","high","low","volume","amount"];
   let html = '<div class="summary"><div class="row">';
   for (const f of fields) {
     if (q[f] !== undefined && q[f] !== null) {
@@ -243,12 +242,13 @@ function showQuoteDetail(containerId, q) {
     }
   }
   html += '</div></div>';
-  // 五档
+  const bidP = q.bid_p || [];
+  const bidV = q.bid_v || [];
+  const askP = q.ask_p || [];
+  const askV = q.ask_v || [];
   html += '<table><thead><tr><th>档位</th><th>买价</th><th>买量</th><th>卖价</th><th>卖量</th></tr></thead><tbody>';
   for (let i = 0; i < 5; i++) {
-    const bp = q["bid" + (i+1)], bv = q["bid_vol" + (i+1)];
-    const ap = q["ask" + (i+1)], av = q["ask_vol" + (i+1)];
-    html += '<tr><td>' + (i+1) + '</td><td>' + fmtNum(bp) + '</td><td>' + fmtNum(bv) + '</td><td>' + fmtNum(ap) + '</td><td>' + fmtNum(av) + '</td></tr>';
+    html += '<tr><td>' + (i+1) + '</td><td>' + fmtNum(bidP[i]) + '</td><td>' + fmtNum(bidV[i]) + '</td><td>' + fmtNum(askP[i]) + '</td><td>' + fmtNum(askV[i]) + '</td></tr>';
   }
   html += '</tbody></table>';
   el(containerId).innerHTML = html;
@@ -297,7 +297,7 @@ async function loadKline() {
     if (data.error) throw new Error(data.error);
     let html = '<div class="summary"><div class="row"><div class="item">代码: <span>' + data.code + '</span></div><div class="item">周期: <span>' + data.period + '</span></div><div class="item">数量: <span>' + data.count + '</span></div></div></div>';
     const headers = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额"];
-    const rows = data.kline.map(k => [k.datetime, k.open, k.high, k.low, k.close, k.vol, k.amount]);
+    const rows = data.kline.map(k => [k.time || k.datetime, k.open, k.high, k.low, k.close, k.volume != null ? k.volume : k.vol, k.amount]);
     html += '<table><thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
     for (const r of rows.reverse()) {
       html += '<tr>' + r.map((v, i) => {
@@ -323,7 +323,7 @@ async function loadKlineAll() {
     if (data.error) throw new Error(data.error);
     let html = '<div class="summary"><div class="row"><div class="item">代码: <span>' + data.code + '</span></div><div class="item">周期: <span>' + data.period + '</span></div><div class="item">总条数: <span>' + data.count + '</span></div></div></div>';
     const headers = ["日期", "开盘", "最高", "最低", "收盘", "成交量", "成交额"];
-    const rows = data.kline.slice(-100).map(k => [k.datetime, k.open, k.high, k.low, k.close, k.vol, k.amount]);
+    const rows = data.kline.slice(-100).map(k => [k.time || k.datetime, k.open, k.high, k.low, k.close, k.volume != null ? k.volume : k.vol, k.amount]);
     html += '<p style="color:#8b949e;margin:8px 0;">显示最近 ' + rows.length + ' 条 (共 ' + data.count + ' 条)</p>';
     html += '<table><thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
     for (const r of rows.reverse()) {
@@ -349,7 +349,7 @@ async function loadTrade() {
     if (data.error) throw new Error(data.error);
     let html = '<div class="summary"><div class="row"><div class="item">代码: <span>' + data.code + '</span></div><div class="item">数量: <span>' + data.count + '</span></div></div></div>';
     const headers = ["时间", "价格", "成交量", "笔数", "买卖方向"];
-    const rows = data.trade.map(t => [t.time, t.price, t.vol, t.num, t.buyorsell]);
+    const rows = data.trade.map(t => [t.time, t.price, t.volume != null ? t.volume : t.vol, t.order_count != null ? t.order_count : t.num, t.direction || t.buyorsell]);
     html += '<table><thead><tr>' + headers.map(h => '<th>'+h+'</th>').join('') + '</tr></thead><tbody>';
     for (const r of rows) {
       html += '<tr>' + r.map(v => '<td>' + fmtNum(v) + '</td>').join('') + '</tr>';

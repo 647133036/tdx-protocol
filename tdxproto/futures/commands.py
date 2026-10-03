@@ -171,6 +171,7 @@ def _p_ex_quote(data: bytes, mid: int, code: str) -> Quote:
     q.price = price
     q.volume = zongliang
     q.amount = xianliang
+    q.change_pct = ((price - pre_close) / pre_close * 100) if pre_close else 0.0
     q.open_interest = chicang
     q.inner_vol = neipan
     q.outer_vol = waipan
@@ -207,6 +208,7 @@ def _p_ex_quote_batch(data: bytes) -> list[Quote]:
         q.price = maichu
         q.volume = zongliang
         q.amount = xianliang
+        q.change_pct = ((maichu - zuojie) / zuojie * 100) if zuojie else 0.0
         q.open_interest = chicang
         q.bid_p[0] = b1
         q.bid_v[0] = bv1

@@ -3,16 +3,23 @@
 
 import json
 import threading
-from dataclasses import is_dataclass, asdict
+from dataclasses import is_dataclass
 import re
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 from tdxproto.stock import StockClient
+from tdxproto.futures import FuturesClient
+from tdxproto.hk import HkClient
+from tdxproto.export import to_dict
 
 # 全局客户端 (懒连接)
 _client = None
 _client_lock = threading.Lock()
+_futures_client = None
+_futures_lock = threading.Lock()
+_hk_client = None
+_hk_lock = threading.Lock()
 
 # ---- 安全常量 ----
 _MAX_REQUEST_BODY = 1024 * 1024      # POST body 上限 1 MB
@@ -31,6 +38,27 @@ def get_client():
                 _client = None
                 raise
     return _client
+
+
+def get_futures_client():
+    global _futures_client
+    with _futures_lock:
+        if _futures_client is None or getattr(_futures_client, "_tube", None) is None:
+            try:
+                _futures_client = FuturesClient(timeout=8)
+                _futures_client.reconnect()
+            except Exception:
+                _futures_client = None
+                raise
+    return _futures_client
+
+
+def get_hk_client():
+    global _hk_client
+    with _hk_lock:
+        if _hk_client is None:
+            _hk_client = HkClient(timeout=10)
+    return _hk_client
 
 
 def _retry_on_conn_error(handler_func):
@@ -54,16 +82,24 @@ def _retry_on_conn_error(handler_func):
 
 
 def release_client():
-    global _client
+    global _client, _futures_client, _hk_client
     with _client_lock:
         if _client:
             _client.close()
             _client = None
+    with _futures_lock:
+        if _futures_client:
+            _futures_client.close()
+            _futures_client = None
+    with _hk_lock:
+        _hk_client = None
 
 
 def dc_to_dict(obj):
     if is_dataclass(obj) and not isinstance(obj, type):
-        return asdict(obj)
+        return to_dict(obj)
+    if isinstance(obj, bytes):
+        return obj.hex()
     return str(obj)
 
 
@@ -116,6 +152,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_count()
         elif parsed.path == "/api/status":
             self._handle_status()
+        elif parsed.path == "/api/futures/quote":
+            self._handle_futures_quote()
+        elif parsed.path == "/api/hk/quote":
+            self._handle_hk_quote()
         else:
             self._send_error(404, "Not Found")
 
@@ -150,9 +190,36 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_status(self):
         with _client_lock:
             connected = _client is not None and getattr(_client, "sock", None) is not None
-        self._send_json({"status": "ok", "connected": connected})
+        with _futures_lock:
+            futures_connected = _futures_client is not None
+        with _hk_lock:
+            hk_connected = _hk_client is not None
+        self._send_json({"status": "ok", "connected": connected, "futures": futures_connected, "hk": hk_connected})
 
-    @_retry_on_conn_error
+    def _handle_futures_quote(self):
+        params = parse_qs(urlparse(self.path).query)
+        code = params.get("code", ["IFL0"])[0]
+        market = int(params.get("market", ["47"])[0])
+        try:
+            c = get_futures_client()
+            q = c.quote(market, code)
+            self._send_json({"code": code, "market": market, "quote": q})
+        except Exception as e:
+            self._send_json({"error": self._sanitize_error(e)}, 500)
+
+    def _handle_hk_quote(self):
+        params = parse_qs(urlparse(self.path).query)
+        code = params.get("code", ["00700"])[0]
+        try:
+            c = get_hk_client()
+            q = c.quote(code)
+            if q:
+                self._send_json({"code": code, "quote": q})
+            else:
+                self._send_json({"code": code, "error": "未找到数据"})
+        except Exception as e:
+            self._send_json({"error": self._sanitize_error(e)}, 500)
+
     def _handle_count(self):
         c = get_client()
         sz = c.count(0)
@@ -341,6 +408,8 @@ tr:hover td { background: #161b22; }
   <div class="tab" data-tab="xdxr">股本变迁</div>
   <div class="tab" data-tab="finance">财务信息</div>
   <div class="tab" data-tab="codes">代码列表</div>
+  <div class="tab" data-tab="futures">期货行情</div>
+  <div class="tab" data-tab="hk">港股行情</div>
 </div>
 
 <div id="overviewPanel" class="panel active">
@@ -450,6 +519,30 @@ tr:hover td { background: #161b22; }
   </div>
 </div>
 
+<div id="futuresPanel" class="panel">
+  <div class="controls">
+    <label>代码</label>
+    <input id="futuresCode" value="IFL0" style="width:120px">
+    <label>市场</label>
+    <input id="futuresMarket" type="number" value="47" style="width:60px">
+    <button onclick="loadFuturesQuote()">查询</button>
+  </div>
+  <div class="content">
+    <div id="futuresResult"></div>
+  </div>
+</div>
+
+<div id="hkPanel" class="panel">
+  <div class="controls">
+    <label>代码</label>
+    <input id="hkCode" value="00700" style="width:120px">
+    <button onclick="loadHkQuote()">查询</button>
+  </div>
+  <div class="content">
+    <div id="hkResult"></div>
+  </div>
+</div>
+
 <script>
 // Tab switching
 document.querySelectorAll(".tab").forEach(tab => {
@@ -520,8 +613,7 @@ function showSummary(containerId, items) {
 }
 
 function showQuoteDetail(containerId, q) {
-  const fields = ["code","name","price","last_close","open","high","low","vol","amount",
-                  "bid1","ask1","bid_vol1","ask_vol1"];
+  const fields = ["code","name","price","pre_close","open","high","low","volume","amount"];
   let html = '<div class="summary"><div class="row">';
   for (const f of fields) {
     if (q[f] !== undefined && q[f] !== null) {
@@ -529,12 +621,13 @@ function showQuoteDetail(containerId, q) {
     }
   }
   html += '</div></div>';
-  // 五档
+  const bidP = q.bid_p || [];
+  const bidV = q.bid_v || [];
+  const askP = q.ask_p || [];
+  const askV = q.ask_v || [];
   html += '<table><thead><tr><th>档位</th><th>买价</th><th>买量</th><th>卖价</th><th>卖量</th></tr></thead><tbody>';
   for (let i = 0; i < 5; i++) {
-    const bp = q["bid" + (i+1)], bv = q["bid_vol" + (i+1)];
-    const ap = q["ask" + (i+1)], av = q["ask_vol" + (i+1)];
-    html += '<tr><td>' + (i+1) + '</td><td>' + fmtNum(bp) + '</td><td>' + fmtNum(bv) + '</td><td>' + fmtNum(ap) + '</td><td>' + fmtNum(av) + '</td></tr>';
+    html += '<tr><td>' + (i+1) + '</td><td>' + fmtNum(bidP[i]) + '</td><td>' + fmtNum(bidV[i]) + '</td><td>' + fmtNum(askP[i]) + '</td><td>' + fmtNum(askV[i]) + '</td></tr>';
   }
   html += '</tbody></table>';
   el(containerId).innerHTML = html;
@@ -712,6 +805,69 @@ async function loadCodes() {
     el("codesResult").innerHTML = html;
   } catch(e) {
     showError("codesResult", e.message);
+  }
+}
+
+async function loadFuturesQuote() {
+  const code = el("futuresCode").value.trim();
+  const market = parseInt(el("futuresMarket").value);
+  if (!code) return;
+  showLoading("futuresResult");
+  try {
+    const data = await api("/api/futures/quote", "GET", {code, market});
+    if (data.error) throw new Error(data.error);
+    const q = data.quote;
+    let html = '<div class="summary"><div class="row">';
+    html += '<div class="item">代码: <span>' + code + '</span></div>';
+    html += '<div class="item">市场: <span>' + market + '</span></div>';
+    html += '<div class="item">最新价: <span>' + fmtNum(q.price) + '</span></div>';
+    html += '<div class="item">昨结: <span>' + fmtNum(q.pre_close) + '</span></div>';
+    html += '<div class="item">今开: <span>' + fmtNum(q.open) + '</span></div>';
+    html += '<div class="item">最高: <span>' + fmtNum(q.high) + '</span></div>';
+    html += '<div class="item">最低: <span>' + fmtNum(q.low) + '</span></div>';
+    html += '<div class="item">成交量: <span>' + fmtNum(q.volume) + '</span></div>';
+    html += '<div class="item">持仓量: <span>' + fmtNum(q.open_interest) + '</span></div>';
+    html += '</div></div>';
+    const bidP = q.bid_p || [];
+    const bidV = q.bid_v || [];
+    const askP = q.ask_p || [];
+    const askV = q.ask_v || [];
+    html += '<table><thead><tr><th>档位</th><th>买价</th><th>买量</th><th>卖价</th><th>卖量</th></tr></thead><tbody>';
+    for (let i = 0; i < 5; i++) {
+      html += '<tr><td>' + (i+1) + '</td><td>' + fmtNum(bidP[i]) + '</td><td>' + fmtNum(bidV[i]) + '</td><td>' + fmtNum(askP[i]) + '</td><td>' + fmtNum(askV[i]) + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    el("futuresResult").innerHTML = html;
+  } catch(e) {
+    showError("futuresResult", e.message);
+  }
+}
+
+async function loadHkQuote() {
+  const code = el("hkCode").value.trim();
+  if (!code) return;
+  showLoading("hkResult");
+  try {
+    const data = await api("/api/hk/quote", "GET", {code});
+    if (data.error) throw new Error(data.error);
+    const q = data.quote;
+    let html = '<div class="summary"><div class="row">';
+    html += '<div class="item">代码: <span>' + code + '</span></div>';
+    html += '<div class="item">名称: <span>' + q.name + '</span></div>';
+    html += '<div class="item">最新价: <span>' + fmtNum(q.price) + '</span></div>';
+    html += '<div class="item">涨跌: <span>' + fmtNum(q.change_amt) + '</span></div>';
+    html += '<div class="item">涨跌幅: <span>' + fmtNum(q.change_pct) + '%</span></div>';
+    html += '<div class="item">今开: <span>' + fmtNum(q.open) + '</span></div>';
+    html += '<div class="item">最高: <span>' + fmtNum(q.high) + '</span></div>';
+    html += '<div class="item">最低: <span>' + fmtNum(q.low) + '</span></div>';
+    html += '<div class="item">成交量: <span>' + fmtNum(q.volume) + '</span></div>';
+    html += '<div class="item">成交额: <span>' + fmtNum(q.amount) + '</span></div>';
+    html += '<div class="item">市盈率: <span>' + fmtNum(q.pe) + '</span></div>';
+    html += '<div class="item">时间: <span>' + q.time + '</span></div>';
+    html += '</div></div>';
+    el("hkResult").innerHTML = html;
+  } catch(e) {
+    showError("hkResult", e.message);
   }
 }
 

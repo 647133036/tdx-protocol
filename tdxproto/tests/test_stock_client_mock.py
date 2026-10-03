@@ -261,3 +261,28 @@ class TestXdxrInvalidDate:
                 rows = client.xdxr("sz000001")
         assert len(rows) == 1
         assert rows[0].date is None
+
+
+class TestQuoteMapping:
+    def test_maps_protocol_fields_and_change_pct(self):
+        client = StockClient(timeout=5, auto_reconnect=False)
+        snap = [{
+            "code": "sz000001", "market": 0, "name": "平安银行",
+            "price": 10.5, "last_close": 10.0, "open": 10.1,
+            "high": 10.8, "low": 10.0, "vol": 1000, "amount": 10500.0,
+            "bid1": 10.49, "bid2": 10.48, "bid3": 10.47, "bid4": 10.46, "bid5": 10.45,
+            "bid_vol1": 1, "bid_vol2": 2, "bid_vol3": 3, "bid_vol4": 4, "bid_vol5": 5,
+            "ask1": 10.50, "ask2": 10.51, "ask3": 10.52, "ask4": 10.53, "ask5": 10.54,
+            "ask_vol1": 6, "ask_vol2": 7, "ask_vol3": 8, "ask_vol4": 9, "ask_vol5": 10,
+            "s_vol": 100, "b_vol": 200,
+        }]
+        with patch.object(client, "_quote_send_recv", return_value=b"x"):
+            with patch("tdxproto.stock.client._p_snapshot", return_value=snap):
+                q = client.quote("sz000001")
+        assert q.pre_close == 10.0
+        assert q.volume == 1000
+        assert abs(q.change_pct - 5.0) < 1e-6
+        assert q.bid_p[0] == 10.49
+        assert q.ask_v[4] == 10
+        assert not hasattr(q, "last_close")
+        assert not hasattr(q, "vol")

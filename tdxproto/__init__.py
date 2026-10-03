@@ -50,6 +50,7 @@ from .block_bridge import BlockBridge, get_block_bridge
 from .universe import CORE_LEADERS, CORE_LEADERS_DESC, core_leader_codes
 from .hk import HkClient, HkQuote
 from .ip_health import get_manager
+from .export import to_dict, to_json, to_csv_string, to_dataframe, to_parquet, to_parquet_string
 try:
     from .mac.client import MacClient
     from .mac.commands import BoardType, SortColumn, SortOrder, FieldBit, Category, FilterType
@@ -57,9 +58,9 @@ try:
 except ImportError:
     _HAS_MAC = False
 
-__version__ = "1.1.3"
+__version__ = "1.1.4"
 __all__ = [
-    "StockClient", "FuturesClient", "MacClient",
+    "StockClient", "FuturesClient",
     "InfoClient", "InfoCollector",
     "CninfoClient", "Announcement", "CninfoError",
     "CcpmClient", "CcpmError", "CcpmNoDataError", "MemberRank", "CcpmProductMeta",
@@ -84,6 +85,11 @@ __all__ = [
     "CORE_LEADERS", "CORE_LEADERS_DESC", "core_leader_codes",
     "get_manager",
     "HkClient", "HkQuote",
-    "BoardType", "SortColumn", "SortOrder", "FieldBit",
-    "Category", "FilterType",
+    "to_dict", "to_json", "to_csv_string", "to_dataframe", "to_parquet", "to_parquet_string",
 ]
+if _HAS_MAC:
+    __all__ += [
+        "MacClient",
+        "BoardType", "SortColumn", "SortOrder", "FieldBit",
+        "Category", "FilterType",
+    ]

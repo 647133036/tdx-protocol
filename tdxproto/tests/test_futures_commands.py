@@ -202,6 +202,25 @@ class TestParsers:
         assert isinstance(q, Quote)
         assert q.code == "T001"
 
+    def test_quote_change_pct_from_pre_close(self):
+        header = struct.pack("<B9s", 47, b"IFL0".ljust(9, b"\x00")) + b"\x00" * 4
+        body = struct.pack(
+            "<fffffIIIIIIIIIfffffIIIIIfffffIIIII",
+            100.0, 101.0, 110.0, 99.0, 105.0,
+            0, 0, 1000, 1, 0, 10, 20, 0, 5000,
+            104.0, 103.0, 102.0, 101.0, 100.0,
+            1, 2, 3, 4, 5,
+            106.0, 107.0, 108.0, 109.0, 110.0,
+            6, 7, 8, 9, 10,
+        )
+        q = _p_ex_quote(header + body, 47, "IFL0")
+        assert q.price == 105.0
+        assert q.pre_close == 100.0
+        assert q.volume == 1000
+        assert abs(q.change_pct - 5.0) < 1e-6
+        assert q.bid_p[0] == 104.0
+        assert q.ask_v[0] == 6
+
     def test_quote_short(self):
         from tdxproto.models import Quote
         q = _p_ex_quote(b"\x00" * 30, 2, "T001")

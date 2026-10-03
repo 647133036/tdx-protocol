@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""批量 K 线采集 CLI — 对标 easy_tdx 采集管线。
+"""批量采集 CLI — K 线 + 港股行情 + 期货行情。
 
 用法:
   # 指定代码文件（每行一个代码）
@@ -14,6 +14,13 @@
   # 核心龙头池（159 只）
   python batch.py kline --universe core --period day --output ./data/
 
+  # 港股批量行情
+  python batch.py hk-quote --codes "00700,09988,01810" --output ./data/
+  python batch.py hk-quote --codes hk_codes.txt --output ./data/
+
+  # 期货批量行情
+  python batch.py futures-quote --market 47 --count 50 --output ./data/
+
   # 基准测试
   python batch.py benchmark --codes codes.txt --workers 16
 
@@ -25,7 +32,7 @@
   --workers  并发数，默认 32（期货建议 16）
   --timeout  单只股票超时秒数，默认 5.0
   --output   输出目录（JSON 格式，每只股票一个文件）
-  --format   输出格式: json|csv，默认 json
+  --format   输出格式: json|csv|parquet，默认 json
 """
 
 import argparse
@@ -36,6 +43,7 @@ import time
 from datetime import date
 
 from tdxproto import scan_stock, scan_futures, STOCK_HOSTS_LARGE, FUTURES_HOSTS_LARGE
+from tdxproto import HkClient, FuturesClient
 from tdxproto.stock.batch_kline import (
     collect_batch_kline,
     collect_all_a_stocks,
@@ -137,6 +145,8 @@ def cmd_kline(args):
     if args.output:
         if args.format == "csv":
             _save_csv(results, args.output)
+        elif args.format == "parquet":
+            _save_parquet(results, args.output)
         else:
             _save_json(results, args.output)
         per_file = save_kline_to_file(results, args.output)
@@ -186,6 +196,119 @@ def cmd_benchmark(args):
     print(f"  单股耗时: {stats['ms_per_stock']:.1f} ms")
 
 
+def _save_parquet(results: list[BatchResult], output_dir: str):
+    """保存结果为 Parquet 文件（需要 pyarrow + pandas）."""
+    os.makedirs(output_dir, exist_ok=True)
+    data = []
+    for r in results:
+        if r.error:
+            data.append({"code": r.code, "time": "", "open": None, "high": None,
+                         "low": None, "close": None, "volume": None, "amount": None,
+                         "error": r.error, "host": r.host or ""})
+            continue
+        for b in r.bars:
+            data.append({"code": r.code, "time": b.time, "open": b.open, "high": b.high,
+                         "low": b.low, "close": b.close, "volume": b.volume,
+                         "amount": b.amount, "error": "", "host": r.host or ""})
+    if not data:
+        print("无数据可保存")
+        return
+    try:
+        from tdxproto import to_parquet
+        path = os.path.join(output_dir, "results.parquet")
+        to_parquet(data, path)
+        print(f"已保存 {len(data)} 条 K 线到 {path}")
+    except ImportError as e:
+        print(f"Parquet 输出需要安装依赖: {e}")
+        print("请运行: pip install tdxproto[parquet]")
+
+
+def _save_hk_json(results: dict, output_dir: str):
+    """保存港股行情为 JSON 文件."""
+    os.makedirs(output_dir, exist_ok=True)
+    from tdxproto import to_dict
+    data = list(to_dict(results).values()) if isinstance(results, dict) else to_dict(results)
+    path = os.path.join(output_dir, "hk_results.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"已保存 {len(data)} 条港股行情到 {path}")
+
+
+def _save_hk_parquet(results: dict, output_dir: str):
+    """保存港股行情为 Parquet 文件."""
+    os.makedirs(output_dir, exist_ok=True)
+    from tdxproto import to_dict
+    data = list(to_dict(results).values()) if isinstance(results, dict) else to_dict(results)
+    if not data:
+        print("无数据可保存")
+        return
+    try:
+        from tdxproto import to_parquet
+        path = os.path.join(output_dir, "hk_results.parquet")
+        to_parquet(data, path)
+        print(f"已保存 {len(data)} 条港股行情到 {path}")
+    except ImportError as e:
+        print(f"Parquet 输出需要安装依赖: {e}")
+        print("请运行: pip install tdxproto[parquet]")
+
+
+def cmd_hk_quote(args):
+    """批量采集港股行情."""
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+
+    print(f"批量采集 {len(codes)} 只港股行情...")
+    t0 = time.time()
+
+    client = HkClient()
+    results = client.quote_batch(codes)
+
+    elapsed = time.time() - t0
+    print(f"\n完成: 成功={len(results)}, 耗时={elapsed:.2f}s")
+
+    if args.output:
+        if args.format == "parquet":
+            _save_hk_parquet(results, args.output)
+        else:
+            _save_hk_json(results, args.output)
+
+
+def cmd_futures_quote(args):
+    """批量采集期货行情."""
+    print(f"批量采集期货行情，市场={args.market}, 数量={args.count}...")
+    t0 = time.time()
+
+    with FuturesClient(timeout=args.timeout) as client:
+        try:
+            quotes = client.quote_batch(args.market, args.start, args.count)
+        except Exception as e:
+            print(f"错误: {e}")
+            return
+
+    elapsed = time.time() - t0
+    print(f"\n完成: 获取={len(quotes)} 条行情, 耗时={elapsed:.2f}s")
+
+    if args.output:
+        os.makedirs(args.output, exist_ok=True)
+        from tdxproto import to_dict
+        data = to_dict(quotes)
+        if args.format == "parquet":
+            try:
+                from tdxproto import to_parquet
+                path = os.path.join(args.output, "futures_results.parquet")
+                to_parquet(data, path)
+                print(f"已保存 {len(data)} 条期货行情到 {path}")
+            except ImportError as e:
+                print(f"Parquet 输出需要安装依赖: {e}")
+                print("请运行: pip install tdxproto[parquet]")
+        else:
+            path = os.path.join(args.output, "futures_results.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"已保存 {len(data)} 条期货行情到 {path}")
+
+
 def cmd_scan(args):
     if args.scan_type == "stock":
         results = scan_stock(STOCK_HOSTS_LARGE, workers=args.workers, timeout=args.timeout)
@@ -204,7 +327,7 @@ def cmd_scan(args):
 
 
 def main():
-    p = argparse.ArgumentParser(description="批量 K 线采集 CLI")
+    p = argparse.ArgumentParser(description="批量采集 CLI — K 线 + 港股 + 期货")
     sub = p.add_subparsers(dest="cmd")
 
     # kline
@@ -213,7 +336,7 @@ def main():
     a.add_argument("--universe", choices=["core"], help="预置股票池: core=核心龙头 159 只")
     a.add_argument("--period", default="day", help="K 线周期: day/1m/5m/15m/30m/60m/week/month")
     a.add_argument("--output", help="输出目录")
-    a.add_argument("--format", choices=["json", "csv"], default="json", help="输出格式")
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json", help="输出格式")
     a.add_argument("--workers", type=int, default=32, help="并发数 (默认 32)")
     a.add_argument("--timeout", type=float, default=5.0, help="单股超时秒数")
     a.add_argument("--failover", action="store_true", default=False, help="启用故障转移 (默认关闭)")
@@ -226,6 +349,21 @@ def main():
     a.add_argument("--output", required=True, help="输出目录")
     a.add_argument("--workers", type=int, default=32)
     a.add_argument("--limit", type=int, help="限制采集数量")
+
+    # hk-quote
+    a = sub.add_parser("hk-quote", help="批量采集港股行情")
+    a.add_argument("--codes", required=True, help="代码列表文件路径或逗号分隔代码")
+    a.add_argument("--output", help="输出目录")
+    a.add_argument("--format", choices=["json", "parquet"], default="json", help="输出格式")
+
+    # futures-quote
+    a = sub.add_parser("futures-quote", help="批量采集期货行情")
+    a.add_argument("--market", type=int, default=47, help="市场代码 (默认 47=中金所)")
+    a.add_argument("--start", type=int, default=0, help="起始位置")
+    a.add_argument("--count", type=int, default=50, help="获取数量")
+    a.add_argument("--output", help="输出目录")
+    a.add_argument("--format", choices=["json", "parquet"], default="json", help="输出格式")
+    a.add_argument("--timeout", type=float, default=8.0, help="超时秒数")
 
     # benchmark
     a = sub.add_parser("benchmark", help="性能基准测试")
@@ -242,7 +380,8 @@ def main():
     if not args.cmd:
         p.print_help(); return
 
-    {"kline": cmd_kline, "all-stocks": cmd_all_stocks, "benchmark": cmd_benchmark, "scan": cmd_scan}[args.cmd](args)
+    {"kline": cmd_kline, "all-stocks": cmd_all_stocks, "hk-quote": cmd_hk_quote,
+     "futures-quote": cmd_futures_quote, "benchmark": cmd_benchmark, "scan": cmd_scan}[args.cmd](args)
 
 
 if __name__ == "__main__":

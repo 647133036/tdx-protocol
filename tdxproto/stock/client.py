@@ -503,17 +503,20 @@ class StockClient:
         q = result[0]
         if "name" not in q:
             q["name"] = self._get_name(code)
+        price = q.get("price", 0.0)
+        pre_close = q.get("last_close", 0.0)
         return Quote(
             code=q.get("code", code),
             market=str(q.get("market", mid)),
             name=q.get("name", ""),
-            price=q.get("price", 0.0),
-            pre_close=q.get("last_close", 0.0),
+            price=price,
+            pre_close=pre_close,
             open=q.get("open", 0.0),
             high=q.get("high", 0.0),
             low=q.get("low", 0.0),
             volume=int(q.get("vol", 0)),
             amount=q.get("amount", 0.0),
+            change_pct=((price - pre_close) / pre_close * 100) if pre_close else 0.0,
             bid_p=[q.get(f"bid{i}", 0.0) for i in range(1, 6)],
             bid_v=[int(q.get(f"bid_vol{i}", 0)) for i in range(1, 6)],
             ask_p=[q.get(f"ask{i}", 0.0) for i in range(1, 6)],

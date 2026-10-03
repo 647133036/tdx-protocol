@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""通达信全协议 CLI — 股票 + 期货 + ETF 一站式。
+"""通达信全协议 CLI — 股票 + 期货 + ETF + 港股 一站式。
 
 用法:
   股票 (7709):
@@ -25,14 +25,18 @@
 
   ETF:
     python main.py etf quote sz159919,sh510050
+
+  港股 (腾讯接口):
+    python main.py hk quote 00700
+    python main.py hk quote-batch 00700,09988,01810
 """
 
 import argparse
 import json
 import sys
-from datetime import date, datetime
+from datetime import date, datetime  # noqa: F401 — datetime used by stock_workday
 
-from tdxproto import StockClient, FuturesClient
+from tdxproto import StockClient, FuturesClient, HkClient
 from tdxproto import compute_factors, get_equity_at, calc_turnover, parse_xdxr
 
 
@@ -40,6 +44,8 @@ def js(obj, default=str):
     def _conv(o):
         if hasattr(o, "__dataclass_fields__"):
             return {f: _conv(getattr(o, f)) for f in o.__dataclass_fields__}
+        if isinstance(o, dict):
+            return {k: _conv(v) for k, v in o.items()}
         if isinstance(o, list):
             return [_conv(i) for i in o]
         if isinstance(o, bytes):
@@ -163,8 +169,6 @@ def stock_blocks(c, a):
 def stock_block_members(c, a):
     js(c.block_members(a.block_code))
 
-from datetime import datetime
-
 def stock_workday(c, a):
     from tdxproto.workday import get_workday_manager
     d = datetime.fromisoformat(a.date).date() if a.date else None
@@ -176,6 +180,8 @@ def stock_workday(c, a):
 def js_inner(obj):
     if hasattr(obj, "__dataclass_fields__"):
         return {f: js_inner(getattr(obj, f)) for f in obj.__dataclass_fields__}
+    if isinstance(obj, dict):
+        return {k: js_inner(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [js_inner(i) for i in obj]
     if isinstance(obj, bytes):
@@ -211,6 +217,22 @@ def etf_quote(c, a):
             result.append(c.quote(code))
         except Exception as e:
             result.append({"code": code, "error": str(e)})
+    js(result)
+
+
+# ========== HK (港股 - 腾讯接口) ==========
+
+def hk_quote(c, a):
+    code = a.code.strip()
+    q = c.quote(code)
+    if q:
+        js(q)
+    else:
+        js({"code": code, "error": "未找到数据"})
+
+def hk_quote_batch(c, a):
+    codes = [x.strip() for x in a.codes.split(",")]
+    result = c.quote_batch(codes)
     js(result)
 
 
@@ -316,6 +338,12 @@ def main():
     es = e.add_subparsers(dest="cmd")
     a = es.add_parser("quote", help="批量行情快照"); a.add_argument("codes")
 
+    # HK (港股)
+    h = sub.add_parser("hk", help="港股行情 (腾讯接口)")
+    hs = h.add_subparsers(dest="cmd")
+    a = hs.add_parser("quote", help="单只港股行情"); a.add_argument("code")
+    a = hs.add_parser("quote-batch", help="批量港股行情"); a.add_argument("codes")
+
     args = p.parse_args()
     if not args.proto:
         p.print_help(); return
@@ -356,6 +384,13 @@ def main():
         with StockClient(timeout=5) as c:
             if args.cmd == "quote":
                 etf_quote(c, args)
+
+    elif args.proto == "hk":
+        c = HkClient()
+        if args.cmd == "quote":
+            hk_quote(c, args)
+        elif args.cmd == "quote-batch":
+            hk_quote_batch(c, args)
 
 
 if __name__ == "__main__":
