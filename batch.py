@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""批量采集 CLI — K 线 + 港股行情 + 期货行情。
+"""批量采集 CLI — K 线 + 分时/成交 + 期货 + 美股 + F10 + 巨潮 + 中金所 + MAC。
 
 用法:
   # 指定代码文件（每行一个代码）
@@ -14,12 +14,30 @@
   # 核心龙头池（159 只）
   python batch.py kline --universe core --period day --output ./data/
 
+  # 股票分时 / 成交明细
+  python batch.py minute --codes "sz000001,sh600000" --output ./data/
+  python batch.py trade --codes "sz000001,sh600000" --date 20260620 --output ./data/
+
   # 港股批量行情
   python batch.py hk-quote --codes "00700,09988,01810" --output ./data/
   python batch.py hk-quote --codes hk_codes.txt --output ./data/
 
-  # 期货批量行情
+  # 期货批量行情 / K 线
   python batch.py futures-quote --market 47 --count 50 --output ./data/
+  python batch.py futures-kline --codes "IFL0,IHL0" --market 47 --output ./data/
+
+  # 美股行情 / K 线 / 分时 / 成交
+  python batch.py us-quote --codes "AAPL,MSFT,NVDA" --output ./data/
+  python batch.py us-kline --codes "AAPL,MSFT" --period day --output ./data/
+  python batch.py us-minute --codes "AAPL,MSFT" --output ./data/
+  python batch.py us-trade --codes "AAPL,MSFT" --output ./data/
+
+  # F10 / 巨潮 / 中金所 / MAC
+  python batch.py info-snapshot --codes "sz000001,sh600000" --output ./data/
+  python batch.py cninfo --codes "000001,600000" --output ./data/
+  python batch.py ccpm --products IF,IH,IC --output ./data/
+  python batch.py mac-boards --type 0 --output ./data/
+  python batch.py mac-flow --codes "sz000001,sh600000" --output ./data/
 
   # 基准测试
   python batch.py benchmark --codes codes.txt --workers 16
@@ -50,6 +68,21 @@ from tdxproto.stock.batch_kline import (
     save_kline_to_file,
     benchmark_collect,
     BatchResult,
+)
+from tdxproto.batch_collect import (
+    collect_futures_kline,
+    collect_us_quote,
+    collect_us_kline,
+    collect_us_minute,
+    collect_us_trade,
+    collect_stock_minute,
+    collect_stock_trade,
+    collect_info_snapshot,
+    collect_cninfo,
+    collect_ccpm,
+    collect_mac_boards,
+    collect_mac_flow,
+    dump_results,
 )
 
 
@@ -309,6 +342,173 @@ def cmd_futures_quote(args):
             print(f"已保存 {len(data)} 条期货行情到 {path}")
 
 
+def _run_item_batch(args, results, stem, flatten=True):
+    ok = sum(1 for r in results if r.error is None)
+    failed = sum(1 for r in results if r.error)
+    print(f"\n完成: 成功={ok}, 失败={failed}")
+    if args.output:
+        try:
+            info = dump_results(
+                results, args.output, stem,
+                fmt=getattr(args, "format", "json"),
+                flatten=flatten,
+                per_file=getattr(args, "per_file", False),
+            )
+            print(f"已保存到 {info['path']}")
+        except ImportError as e:
+            print(f"导出失败: {e}")
+            print("请运行: pip install tdxproto[parquet]")
+
+
+def cmd_minute(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只股票分时, workers={args.workers}")
+    t0 = time.time()
+    results = collect_stock_minute(codes, date=args.date, max_workers=args.workers, timeout=args.timeout)
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "minute_results")
+
+
+def cmd_trade(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只股票成交明细, workers={args.workers}")
+    t0 = time.time()
+    results = collect_stock_trade(
+        codes, date=args.date, start=args.start, count=args.count,
+        max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "trade_results")
+
+
+def cmd_futures_kline(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只期货 K 线, market={args.market}, period={args.period}")
+    t0 = time.time()
+    results = collect_futures_kline(
+        codes, market=args.market, period=args.period, start=args.start, count=args.count,
+        max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "futures_kline_results")
+
+
+def cmd_us_quote(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只美股行情, market={args.market}")
+    t0 = time.time()
+    results = collect_us_quote(
+        codes, market=args.market, max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "us_quote_results")
+
+
+def cmd_us_kline(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只美股 K 线, market={args.market}, period={args.period}")
+    t0 = time.time()
+    results = collect_us_kline(
+        codes, market=args.market, period=args.period, start=args.start, count=args.count,
+        max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "us_kline_results")
+
+
+def cmd_us_minute(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只美股分时, market={args.market}")
+    t0 = time.time()
+    results = collect_us_minute(
+        codes, market=args.market, date=args.date, max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "us_minute_results")
+
+
+def cmd_us_trade(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只美股成交, market={args.market}")
+    t0 = time.time()
+    results = collect_us_trade(
+        codes, market=args.market, date=args.date, start=args.start, count=args.count,
+        max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "us_trade_results")
+
+
+def cmd_info_snapshot(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只 F10 snapshot, workers={args.workers}")
+    t0 = time.time()
+    results = collect_info_snapshot(codes, max_workers=args.workers, timeout=args.timeout)
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "info_snapshot_results", flatten=False)
+
+
+def cmd_cninfo(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只巨潮公告, workers={args.workers}")
+    t0 = time.time()
+    results = collect_cninfo(
+        codes, count=args.count, page=args.page, keyword=args.keyword,
+        max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "cninfo_results")
+
+
+def cmd_ccpm(args):
+    products = _load_codes(args.products) or ["all"]
+    print(f"批量采集中金所持仓排名: {','.join(products)}")
+    t0 = time.time()
+    results = collect_ccpm(
+        products, date=args.date, latest=not args.date, refresh=args.refresh,
+        max_workers=args.workers, timeout=args.timeout,
+    )
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "ccpm_results", flatten=False)
+
+
+def cmd_mac_boards(args):
+    print(f"采集 MAC 板块列表, type={args.type}")
+    t0 = time.time()
+    results = collect_mac_boards(board_type=args.type, page_size=args.page_size, timeout=args.timeout)
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "mac_boards_results")
+
+
+def cmd_mac_flow(args):
+    codes = _load_codes(args.codes)
+    if not codes:
+        print("错误: 代码列表为空"); return
+    print(f"批量采集 {len(codes)} 只 MAC 资金流向")
+    t0 = time.time()
+    results = collect_mac_flow(codes, max_workers=args.workers, timeout=args.timeout)
+    print(f"耗时={time.time()-t0:.1f}s")
+    _run_item_batch(args, results, "mac_flow_results", flatten=False)
+
+
 def cmd_scan(args):
     if args.scan_type == "stock":
         results = scan_stock(STOCK_HOSTS_LARGE, workers=args.workers, timeout=args.timeout)
@@ -327,7 +527,7 @@ def cmd_scan(args):
 
 
 def main():
-    p = argparse.ArgumentParser(description="批量采集 CLI — K 线 + 港股 + 期货")
+    p = argparse.ArgumentParser(description="批量采集 CLI — K 线 + 分时/成交 + 期货 + 美股 + F10 + 巨潮 + 中金所 + MAC")
     sub = p.add_subparsers(dest="cmd")
 
     # kline
@@ -350,7 +550,26 @@ def main():
     a.add_argument("--workers", type=int, default=32)
     a.add_argument("--limit", type=int, help="限制采集数量")
 
-    # hk-quote
+    a = sub.add_parser("minute", help="批量采集股票分时")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--date", default=None)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=16)
+    a.add_argument("--timeout", type=float, default=5.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("trade", help="批量采集股票成交明细")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--date", default=None)
+    a.add_argument("--start", type=int, default=0)
+    a.add_argument("--count", type=int, default=100)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=16)
+    a.add_argument("--timeout", type=float, default=5.0)
+    a.add_argument("--per-file", action="store_true")
+
     a = sub.add_parser("hk-quote", help="批量采集港股行情")
     a.add_argument("--codes", required=True, help="代码列表文件路径或逗号分隔代码")
     a.add_argument("--output", help="输出目录")
@@ -365,7 +584,103 @@ def main():
     a.add_argument("--format", choices=["json", "parquet"], default="json", help="输出格式")
     a.add_argument("--timeout", type=float, default=8.0, help="超时秒数")
 
-    # benchmark
+    a = sub.add_parser("futures-kline", help="批量采集期货 K 线")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--market", type=int, default=47)
+    a.add_argument("--period", default="day")
+    a.add_argument("--start", type=int, default=0)
+    a.add_argument("--count", type=int, default=100)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=16)
+    a.add_argument("--timeout", type=float, default=8.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("us-quote", help="批量采集美股行情")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--market", type=int, default=74)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=16)
+    a.add_argument("--timeout", type=float, default=8.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("us-kline", help="批量采集美股 K 线")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--market", type=int, default=74)
+    a.add_argument("--period", default="day")
+    a.add_argument("--start", type=int, default=0)
+    a.add_argument("--count", type=int, default=100)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=16)
+    a.add_argument("--timeout", type=float, default=8.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("us-minute", help="批量采集美股分时")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--market", type=int, default=74)
+    a.add_argument("--date", default=None)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=16)
+    a.add_argument("--timeout", type=float, default=8.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("us-trade", help="批量采集美股成交")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--market", type=int, default=74)
+    a.add_argument("--date", default=None)
+    a.add_argument("--start", type=int, default=0)
+    a.add_argument("--count", type=int, default=100)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=16)
+    a.add_argument("--timeout", type=float, default=8.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("info-snapshot", help="批量采集 F10 资料快照")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=8)
+    a.add_argument("--timeout", type=float, default=15.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("cninfo", help="批量采集巨潮公告")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--count", type=int, default=10)
+    a.add_argument("--page", type=int, default=1)
+    a.add_argument("--keyword", default="")
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=8)
+    a.add_argument("--timeout", type=float, default=20.0)
+    a.add_argument("--per-file", action="store_true")
+
+    a = sub.add_parser("ccpm", help="批量采集中金所持仓排名")
+    a.add_argument("--products", default="all", help="IF,IH,IC 或 all")
+    a.add_argument("--date", default=None)
+    a.add_argument("--refresh", action="store_true")
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=4)
+    a.add_argument("--timeout", type=float, default=20.0)
+
+    a = sub.add_parser("mac-boards", help="采集 MAC 板块列表并落盘")
+    a.add_argument("--type", type=int, default=0)
+    a.add_argument("--page-size", type=int, default=150)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "csv", "parquet"], default="json")
+    a.add_argument("--timeout", type=float, default=8.0)
+
+    a = sub.add_parser("mac-flow", help="批量采集 MAC 资金流向")
+    a.add_argument("--codes", required=True)
+    a.add_argument("--output", required=True)
+    a.add_argument("--format", choices=["json", "parquet"], default="json")
+    a.add_argument("--workers", type=int, default=4)
+    a.add_argument("--timeout", type=float, default=8.0)
+
     a = sub.add_parser("benchmark", help="性能基准测试")
     a.add_argument("--codes", required=True, help="代码列表文件路径或逗号分隔")
     a.add_argument("--workers", type=int, default=16)
@@ -380,8 +695,17 @@ def main():
     if not args.cmd:
         p.print_help(); return
 
-    {"kline": cmd_kline, "all-stocks": cmd_all_stocks, "hk-quote": cmd_hk_quote,
-     "futures-quote": cmd_futures_quote, "benchmark": cmd_benchmark, "scan": cmd_scan}[args.cmd](args)
+    {
+        "kline": cmd_kline, "all-stocks": cmd_all_stocks,
+        "minute": cmd_minute, "trade": cmd_trade,
+        "hk-quote": cmd_hk_quote, "futures-quote": cmd_futures_quote,
+        "futures-kline": cmd_futures_kline,
+        "us-quote": cmd_us_quote, "us-kline": cmd_us_kline,
+        "us-minute": cmd_us_minute, "us-trade": cmd_us_trade,
+        "info-snapshot": cmd_info_snapshot, "cninfo": cmd_cninfo,
+        "ccpm": cmd_ccpm, "mac-boards": cmd_mac_boards, "mac-flow": cmd_mac_flow,
+        "benchmark": cmd_benchmark, "scan": cmd_scan,
+    }[args.cmd](args)
 
 
 if __name__ == "__main__":

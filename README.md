@@ -1,8 +1,8 @@
 # tdxproto — 通达信行情协议解析器
 
-Python 3.9+ 纯 Python 实现。核心库仅依赖标准库，可连接通达信 7709 股票协议、7727 期货协议，并支持 7615 F10 资讯、巨潮资讯、中金所持仓排名、港股行情、导出工具、CLI、批量采集和本地 Web 查询界面。
+Python 3.9+ 纯 Python 实现。核心库仅依赖标准库，可连接通达信 7709 股票协议、7727 期货与美股扩展行情，并支持 7615 F10 资讯、巨潮资讯、中金所持仓排名、港股行情、导出工具、CLI、批量采集和本地 Web 查询界面。
 
-版本 **1.1.4**
+版本 **1.1.5**
 
 ## 能力概览
 
@@ -15,14 +15,15 @@ Python 3.9+ 纯 Python 实现。核心库仅依赖标准库，可连接通达信
 | 财务 / 股本 | `finance()` / `capital_changes()` / `xdxr()` |
 | 资金 / 涨跌停 | `capital_flow()` / `market_stat()` / `limits()` |
 | 板块 / 排行 | MAC 板块列表、成分股、排行、归属，以及 `top_board()` / `unusual()` |
-| 期货行情 | `FuturesClient.quote()` / `quote_batch()`，五档、成交量、持仓量 |
+| 期货行情 | `FuturesClient.quote(47, "IFL0")` / `quote_batch()`，五档、成交量、持仓量 |
 | 期货 K 线 / 分时 / 分笔 | `kline()` / `kline_range()` / `today_minute()` / `today_trade()` |
+| 美股 | `FuturesClient.quote(74, "AAPL")` / `kline(74, "AAPL")`，7727 扩展行情市场号 74 |
 | ETF | 通过股票协议查询 ETF 实时行情 |
 | 港股 | `HkClient.quote()` / `quote_batch()`，腾讯行情接口 |
 | F10 资讯 | `InfoClient` / `InfoCollector`，新闻、公告、研报、财务诊断、资料快照 |
 | 巨潮资讯 | `CninfoClient`，公告检索、公告列表、PDF 下载 |
 | 中金所持仓排名 | `CcpmClient`，IF / IH / IC / IM / TS / TF / T / TL 会员排名 |
-| 批量采集 | `batch.py` K 线、港股、期货行情批量采集 |
+| 批量采集 | `batch.py` K 线、分时、成交、港股、期货、美股、F10、巨潮、中金所、MAC |
 | 数据导出 | JSON / CSV / DataFrame / Parquet，Parquet 为可选依赖 |
 | 本地 Web | `web_server.py` 股票、期货、港股查询界面 |
 | 断线自愈 | 重试、主机故障转移、IP 健康监控、主机测速 |
@@ -81,6 +82,24 @@ with FuturesClient() as f:
     bars = f.kline(47, "IFL0", "day", 0, 100)
 ```
 
+### 美股
+
+美股走 7727 扩展行情，市场号 `74`，客户端复用 `FuturesClient`。代码写 `AAPL`；`usAAPL` 会在 CLI 里剥掉 `us` 前缀。
+
+```python
+from tdxproto import FuturesClient
+
+with FuturesClient() as f:
+    quote = f.quote(74, "AAPL")
+    print(quote.price, quote.pre_close, quote.volume)
+
+    bars = f.kline(74, "AAPL", "day", 0, 100)
+    minute = f.today_minute(74, "AAPL")
+    trades = f.today_trade(74, "AAPL", 0, 50)
+```
+
+`Quote` 字段用 `pre_close` / `volume` / `bid_p` / `bid_v` / `ask_p` / `ask_v`。
+
 ### ETF
 
 ```python
@@ -92,6 +111,8 @@ with StockClient() as c:
 ```
 
 ### 港股
+
+港股走腾讯接口 `HkClient`，与 7727 美股协议分开。
 
 ```python
 from tdxproto import HkClient
@@ -137,15 +158,20 @@ pip install "tdxproto[parquet]"
 
 ## CLI
 
-单协议命令入口是 `main.py`：
+单协议查询入口是 `python main.py`，覆盖股票、期货、美股、ETF、港股、F10、巨潮、中金所和 MAC：
 
 ```bash
 # A 股
 python main.py stock count sz
 python main.py stock quote sz000001,sh600000
 python main.py stock kline sz000001 --period day --start 0 --count 10
+python main.py stock kline-120m sz000001
+python main.py stock kline-derived sz000001 --period day
 python main.py stock minute sz000001
 python main.py stock trade sz000001 20260620
+python main.py stock quotes-detail sz000001,sh600000
+python main.py stock capital-flow sz000001
+python main.py stock market-stat
 python main.py stock equity sz000001
 python main.py stock finance sz000001,sh600000
 python main.py stock limits
@@ -155,7 +181,18 @@ python main.py futures markets
 python main.py futures codes 47
 python main.py futures quote IFL0 --market 47
 python main.py futures kline IFL0 --market 47 --period day
+python main.py futures kline-range IFL0 --start-date 20260101 --end-date 20260301
 python main.py futures trade IFL0 --market 47
+python main.py futures tick-chart IFL0 --market 47
+python main.py futures main-contract IF
+
+# 美股 (7727 扩展行情, 市场 74)
+python main.py us quote AAPL
+python main.py us kline AAPL --period day
+python main.py us kline-range AAPL --start-date 20260101 --end-date 20260301
+python main.py us minute AAPL
+python main.py us trade AAPL
+python main.py us tick-chart AAPL
 
 # ETF
 python main.py etf quote sz159919,sh510050
@@ -164,12 +201,19 @@ python main.py etf quote sz159919,sh510050
 python main.py hk quote 00700
 python main.py hk quote-batch 00700,09988,01810
 
+# F10 / 巨潮 / 中金所 / MAC
+python main.py info news sz000001
+python main.py info snapshot sz000001
+python main.py cninfo search 000001
+python main.py ccpm latest IF
+python main.py mac board-list
+
 # 主机扫描
 python main.py scan stock
 python main.py scan futures
 ```
 
-批量采集入口是 `batch.py`：
+批量采集入口是 `python batch.py`：
 
 ```bash
 # 指定代码采集 K 线
@@ -185,8 +229,26 @@ python batch.py all-stocks --period day --output ./data/ --workers 32
 python batch.py hk-quote --codes "00700,09988,01810" --output ./data/
 python batch.py hk-quote --codes hk_codes.txt --output ./data/
 
-# 期货行情
+# 期货行情 / K 线
 python batch.py futures-quote --market 47 --count 50 --output ./data/
+python batch.py futures-kline --codes "IFL0,IHL0" --market 47 --output ./data/
+
+# 美股行情 / K 线 / 分时 / 成交
+python batch.py us-quote --codes "AAPL,MSFT,NVDA" --output ./data/
+python batch.py us-kline --codes "AAPL,MSFT" --period day --output ./data/
+python batch.py us-minute --codes "AAPL,MSFT" --output ./data/
+python batch.py us-trade --codes "AAPL,MSFT" --output ./data/
+
+# 股票分时 / 成交明细
+python batch.py minute --codes "sz000001,sh600000" --output ./data/
+python batch.py trade --codes "sz000001,sh600000" --date 20260620 --output ./data/
+
+# F10 / 巨潮 / 中金所 / MAC
+python batch.py info-snapshot --codes "sz000001,sh600000" --output ./data/
+python batch.py cninfo --codes "000001,600000" --output ./data/
+python batch.py ccpm --products IF,IH,IC --output ./data/
+python batch.py mac-boards --type 0 --output ./data/
+python batch.py mac-flow --codes "sz000001,sh600000" --output ./data/
 
 # 输出格式
 python batch.py kline --codes codes.txt --format json --output ./data/
@@ -249,6 +311,8 @@ from tdxproto import to_dict, to_json, to_csv_string, to_dataframe, to_parquet, 
 | `sz` | 深圳 A 股 / 深市指数 | `sz000001` 平安银行，`sz399001` 深证成指 |
 | `sh` | 上海 A 股 / 沪市指数 | `sh600000` 浦发银行，`sh000001` 上证指数 |
 | `bj` | 北京证券交易所 | `bj830799` |
+| 无前缀 | 期货 / 美股 | 期货 `IFL0`（市场 47），美股 `AAPL`（市场 74） |
+| `hk` / 五位数字 | 港股腾讯接口 | `00700` 腾讯 |
 
 数字代码在不同市场含义不同，例如 `000001` 在深市是股票，在沪市是上证指数，因此推荐使用带前缀代码。
 
@@ -269,12 +333,12 @@ board_list(), board_members(), stock_blocks(), top_board(), unusual()
 
 ### FuturesClient
 
-主要方法包括：
+期货默认市场号 `47`，美股市场号 `74`：
 
 ```python
 markets(), codes(), codes_all(), quote(), quote_batch(),
 kline(), kline_range(), today_minute(), history_minute(),
-today_trade(), history_trade(), get_main_contract()
+today_trade(), history_trade(), tick_chart(), quotes(), get_main_contract()
 ```
 
 ### 港股 HkClient
@@ -326,9 +390,10 @@ tdxproto/
 ├── hosts.py          # 服务器地址表
 ├── ip_health.py      # IP 健康监控
 ├── export.py         # JSON / CSV / DataFrame / Parquet 导出
+├── batch_collect.py  # 分时/成交/期货K线/美股/F10/巨潮/中金所/MAC 采集管线
 ├── _reconnect.py     # 重连策略
 ├── stock/            # 7709 股票协议
-├── futures/          # 7727 期货协议
+├── futures/          # 7727 期货 / 美股扩展行情
 ├── hk/               # 港股行情
 ├── info/             # 7615 F10 资讯
 ├── cninfo/           # 巨潮资讯
@@ -361,14 +426,15 @@ python3 -m pytest tdxproto/tests/ -q -m "not system"
 当前非系统测试状态：
 
 ```text
-436 passed, 2 skipped, 16 deselected
+467 passed, 2 skipped, 16 deselected
 ```
 
 系统测试依赖外网通达信服务器、行情接口和数据源接口；默认通过 `-m "not system"` 排除。
 
 ## 变更记录
 
-- **1.1.4** — 新增数据导出模块 `tdxproto/export.py`，支持 `to_dict()` / `to_json()` / `to_csv_string()` / `to_dataframe()` / `to_parquet()` / `to_parquet_string()`；新增 `tdxproto[parquet]` 可选依赖；`main.py` 新增港股 CLI（`hk quote` / `hk quote-batch`），并修复嵌套 dict 递归 JSON 输出；`batch.py` 新增港股行情、期货行情批量采集与 Parquet 输出；`web_server.py` 新增期货、港股查询 API 和页面，并修复行情字段映射；修正 `Quote.change_pct`、MAC 可选导出和 bytes 序列化；补充导出、CLI、Web、包导出、Quote 映射测试；非系统测试 436 passed
+- **1.1.5** — `main.py` 新增美股 CLI（`us quote` / `kline` / `kline-range` / `minute` / `trade` / `tick-chart` / `quotes` / `codes`，7727 市场号 74）；`batch.py` 新增 `us-quote` / `us-kline` / `us-minute` / `us-trade`；`tdxproto/batch_collect.py` 新增美股采集管线；同步 README 与 CLI/采集测试；非系统测试 467 passed
+- **1.1.4** — 新增数据导出模块 `tdxproto/export.py`，支持 `to_dict()` / `to_json()` / `to_csv_string()` / `to_dataframe()` / `to_parquet()` / `to_parquet_string()`；新增 `tdxproto[parquet]` 可选依赖；`main.py` 新增港股 CLI（`hk quote` / `hk quote-batch`），并修复嵌套 dict 递归 JSON 输出；`main.py` 补齐股票/期货缺口命令，并接入 `info` / `cninfo` / `ccpm` / `mac` 子命令；`batch.py` 新增分时、成交、期货 K 线、F10 snapshot、巨潮、中金所、MAC 批量采集与 Parquet 输出；新增 `tdxproto/batch_collect.py` 采集管线；`web_server.py` 新增期货、港股查询 API 和页面，并修复行情字段映射；修正 `Quote.change_pct`、MAC 可选导出和 bytes 序列化；补充导出、CLI、Web、包导出、Quote 映射与采集管线测试
 - **1.1.3** — 修复板块成分股字段解析顺序与类型：新增 `_BOARD_MEMBERS_FIELD_ORDER` 按预期顺序解析（PRE_CLOSE/CLOSE/VOL/AMOUNT/PRICE/RISE_SPEED/MAIN_NET_AMOUNT/UP_COUNT/DOWN_COUNT）；RISE_SPEED 加入 `_INT_FIELD_BITS` 并转换为百分比（基点/10000）；VOL 正确读取为 INT 类型；测试 407 passed
 - **1.1.2** — 新增 `tdxproto/hk/` 港股行情模块（HkClient/HkQuote，腾讯行情 API，`quote` / `quote_batch`，时间锚点相对定位应对字段波动）；板块排行细化（`board_amount_ranking` / `board_volume_ranking`，服务器端排序 + top_n 截断）；代码审查 9 项修复；安全审查 4 项修复
 - **1.1.1** — 对标 easy_tdx 补齐采集能力：新增 `session.py` 交易时段/分时锚定工具；`today_minute` 盘前/休市自动锚定最近交易日历史分时；指数分时自适应；`Kline.datetime` property 别名；`kline_120m` 修复；`kline_with_derived` 补充 `time` 键；workday 入库改存 ISO 日期；新增 `universe.py` 核心龙头池 159 只；安全加固 cninfo URL 白名单、PDF 下载路径穿越防护、ccpm 主机白名单和 web_server 代码正则
